@@ -1,6 +1,8 @@
 .DS_Store
 .build*/
 build*/
+*.exe
+*.dll
 *.mp4
 *.webm
 *.yuv
@@ -11,6 +13,8 @@ build*/
 *.log
 *.bit
 *.bits
+*.cfg
+*.7z
 [0-9]
 [a-z].sh
 [a-z].bat
