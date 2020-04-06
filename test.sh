@@ -5,8 +5,8 @@ set -eu -o pipefail
 #
 [ "$#" -gt 0 ] && ./core/testbench.sh -h && exit
 
-#CODECS="ashevc x265 kvazaar kingsoft intel h265demo h264demo"
-CODECS="ashevc x265 kvazaar kingsoft intel h265demo"
+#CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
+CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo"
 #CODECS=ashevc
 #CODECS=x265
 

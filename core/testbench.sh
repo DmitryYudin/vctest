@@ -5,7 +5,7 @@ readonly dirScript="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && 
 PRMS="28 34 39 44"
 REPORT=report.log
 REPORT_KW=report_kw.log
-CODECS="ashevc x265 kvazaar kingsoft intel h265demo h264demo"
+CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
 VECTORS="
 	$dirScript/../vectors/akiyo_cif.yuv
 	$dirScript/../vectors/foreman_cif.yuv
@@ -66,6 +66,16 @@ entrypoint()
 
 	mkdir -p "$DIR_OUT"
 
+	# Make sure we can run intel hardware encoder
+	if echo "$CODECS" | grep -i 'intel_hw' > /dev/null; then
+		cmd=$(cmd_intel_hw -i "$0" -o "$DIR_OUT/out.tmp" --res "64x64" --fps 30)
+		if ! $cmd 1>/dev/null 2>&1; then
+			echo "warning: intel_hw encoder is not available" >&2;
+			CODECS=$(echo "$CODECS" | sed 's/intel_hw//')
+		fi
+		rm -f "$DIR_OUT/out.tmp"
+	fi
+
 	readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 	if [ -z "$hide_banner" ]; then
 		echo "$timestamp" >> $REPORT
@@ -115,7 +125,7 @@ entrypoint()
 			x264) 		set -- "$@" --preset "medium" ;;
 			kvazaar) 	set -- "$@" --preset "medium" ;;
 			kingsoft)	set -- "$@" --preset "medium" ;;
-			intel)		set -- "$@" --preset "medium" ;;
+			intel_*)	set -- "$@" --preset "medium" ;;
 			h265demo)	: ;;
 			h264demo)	: ;;
 		esac
@@ -175,7 +185,7 @@ start_cpu_monitor()
 		x265) 		encoderExe=$x265EncoderExe;;
 		kvazaar) 	encoderExe=$kvazaarEncoderExe;;
 		kingsoft) 	encoderExe=$kingsoftEncoderExe;;
-		intel)		encoderExe=$intelEncoderExe;;
+		intel*)		encoderExe=$intelEncoderExe;;
 		h265demo)	encoderExe=$h265EncDemoExe;;
 		h264demo)	encoderExe=$HW264_Encoder_DemoExe;;
 		*) echo "unknown codec($LINENO): $codecId" >&2 && return 1 ;;
@@ -478,7 +488,7 @@ parse_stdoutLog()
 			fps=$(cat "$log" | grep 'test time: ' | tr -s ' ' | cut -d' ' -f 8)
 			#fps=$(cat "$log" | grep 'pure encoding time:' | head -n 1 | tr -s ' ' | cut -d' ' -f 8)
 		;;
-		intel)
+		intel_*)
 			fps=$(cat "$log" | grep 'Encoding fps:' | tr -s ' ' | cut -d' ' -f 3)
 		;;
 		h265demo)
@@ -616,7 +626,7 @@ cmd_kingsoft()
 	echo "$kingsoftEncoderExe $args"
 }
 
-cmd_intel()
+cmd_intel_sw()
 {
 	local args= threads=1 res=
 	while [ "$#" -gt 0 ]; do
@@ -650,6 +660,10 @@ cmd_intel()
 #	args="$args -hw"				# Hardware (default)
 
 	echo "$intelEncoderExe h265 $args"
+}
+cmd_intel_hw() 
+{
+	echo "$(cmd_intel_sw "$@") -hw"
 }
 
 cmd_h265demo()
