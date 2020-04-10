@@ -35,7 +35,7 @@ usage()
 	    -o|--output   Report path.
 	    -c|--codec    Codecs list. Default: "$CODECS".
 	    -p|--prms     Bitrate (kbps) or QP list. Default: "$PRMS".
-
+	       --hide     Do not print legend and header
 	Note, 'prms' values less than 60 considered as QP.
 	EOF
 }
@@ -43,7 +43,9 @@ usage()
 entrypoint()
 {
 	local cmd_vec= cmd_report= cmd_codecs= cmd_prms= cmd_dirOut=
+	local hide_banner=
 	while [ "$#" -gt 0 ]; do
+		local nargs=2
 		case $1 in
 			-h|--help)		usage && return;;
 			-i|--in*) 		cmd_vec="$cmd_vec $2";;
@@ -51,9 +53,10 @@ entrypoint()
 			-o|--out*) 		cmd_report=$2;;
 			-c|--codec*) 	cmd_codecs=$2;;
 			-p|--prm*) 		cmd_prms=$2;;
+			   --hide)		hide_banner=1; nargs=1;;
 			*) echo "error: unrecognized option '$1'" >&2 && return 1
 		esac
-		shift 2
+		shift $nargs
 	done
 	[ -n "$cmd_dirOut" ] && DIR_OUT=$cmd_dirOut
 	[ -n "$cmd_report" ] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}_kw.${REPORT##*.}
@@ -64,12 +67,13 @@ entrypoint()
 	mkdir -p "$DIR_OUT"
 
 	readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-	echo "$timestamp" >> $REPORT
-	echo "$timestamp" >> $REPORT_KW
+	if [ -z "$hide_banner" ]; then
+		echo "$timestamp" >> $REPORT
+		echo "$timestamp" >> $REPORT_KW
 
-	print_legend
-
-	print_header
+		print_legend
+		print_header
+	fi
 
 	local prm= src= codecId=
 	for prm in $PRMS; do
