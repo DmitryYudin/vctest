@@ -663,7 +663,7 @@ cmd_kingsoft()
 	echo "$kingsoftEncoderExe $args"
 }
 
-cmd_intel_sw()
+cmd_intel()
 {
 	local args= threads=1 res=
 	while [ "$#" -gt 0 ]; do
@@ -693,14 +693,16 @@ cmd_intel_sw()
 	args="$args -nobref"            # Disable B-frames (Do not reference B-frames)
 	args="$args -x 1"         		# Number of reference frames
 #	args="$args -num_active_P 1"	# Number of maximum allowed references for P frames
-	args="$args -sw"				# Software
-#	args="$args -hw"				# Hardware (default)
 
 	echo "$intelEncoderExe h265 $args"
 }
+cmd_intel_sw()
+{
+	echo "$(cmd_intel "$@") -sw"
+}
 cmd_intel_hw() 
 {
-	echo "$(cmd_intel_sw "$@") -hw"
+	echo "$(cmd_intel "$@") -hw"
 }
 
 cmd_h265demo()
