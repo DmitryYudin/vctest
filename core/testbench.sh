@@ -6,6 +6,7 @@ PRMS="28 34 39 44"
 REPORT=report.log
 REPORT_KW=report_kw.log
 CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
+PRESETS=
 VECTORS="
 	$dirScript/../vectors/akiyo_cif.yuv
 	$dirScript/../vectors/foreman_cif.yuv
@@ -35,6 +36,15 @@ usage()
 	    -o|--output   Report path.
 	    -c|--codec    Codecs list. Default: "$CODECS".
 	    -p|--prms     Bitrate (kbps) or QP list. Default: "$PRMS".
+	       --preset   Codec-specific list of 'preset' options (default: marked by *):
+	                  ashevc:   *1 2 3 4 5 6
+	                  x265:     *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
+	                  kvazaar:  *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
+	                  kingsoft:  ultrafast *superfast veryfast         fast medium slow        veryslow placebo
+	                  intel_sw:                       veryfast *faster fast medium slow slower veryslow
+	                  intel_hw:                       veryfast  faster fast medium slow slower veryslow
+	                  h265demo: 6 *5 4 3 2 1
+	                  h264demo: N/A
 	       --hide     Do not print legend and header
 	Note, 'prms' values less than 60 considered as QP.
 	EOF
@@ -42,7 +52,7 @@ usage()
 
 entrypoint()
 {
-	local cmd_vec= cmd_report= cmd_codecs= cmd_prms= cmd_dirOut=
+	local cmd_vec= cmd_report= cmd_codecs= cmd_prms= cmd_presets= cmd_dirOut=
 	local hide_banner=
 	while [ "$#" -gt 0 ]; do
 		local nargs=2
@@ -53,6 +63,7 @@ entrypoint()
 			-o|--out*) 		cmd_report=$2;;
 			-c|--codec*) 	cmd_codecs=$2;;
 			-p|--prm*) 		cmd_prms=$2;;
+			   --pre*) 		cmd_presets=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
 			*) echo "error: unrecognized option '$1'" >&2 && return 1
 		esac
@@ -63,6 +74,7 @@ entrypoint()
 	[ -n "$cmd_vec" ] && VECTORS=${cmd_vec# }
 	[ -n "$cmd_codecs" ] && CODECS=$cmd_codecs
 	[ -n "$cmd_prms" ] && PRMS=$cmd_prms
+	[ -n "$cmd_presets" ] && PRESETS=$cmd_presets
 
 	mkdir -p "$DIR_OUT"
 
@@ -89,6 +101,7 @@ entrypoint()
 	for prm in $PRMS; do
 	for src in $VECTORS; do
 	for codecId in $CODECS; do
+	for preset in ${PRESETS:--}; do
 		local qp=- bitrate=-
 		if [ $prm -lt 60 ]; then
 			qp=$prm
@@ -113,6 +126,8 @@ entrypoint()
 		else
 			dst=$DIR_OUT/$codecId/"$(basename "$src")".br=$bitrate.$ext
 		fi
+		[ $preset == '-' ] && preset=$(codec_default_preset "$codecId")
+
 		local recon=$dst.yuv
 		rm -rf "$dst" "$recon"
 
@@ -120,18 +135,11 @@ entrypoint()
 		set -- -i "$src" -o "$dst" --res "$srcRes" --fps $srcFps
 		[ $bitrate == '-' ] || set -- "$@" --bitrate $bitrate
 		[ $qp == '-' ]      || set -- "$@" --qp $qp
-		case $codecId in
-			ashevc) 	set -- "$@" --preset 5 ;; # 1 is fastest, 6 is slowest. default 5
-			x264) 		set -- "$@" --preset "medium" ;;
-			kvazaar) 	set -- "$@" --preset "medium" ;;
-			kingsoft)	set -- "$@" --preset "medium" ;;
-			intel_*)	set -- "$@" --preset "medium" ;;
-			h265demo)	: ;;
-			h264demo)	: ;;
-		esac
+		[ $preset == '-' ] || set -- "$@" --preset $preset
+
 		local cmd=
 		cmd=$(cmd_${codecId} "$@")
-		local info="codecId:$codecId srcRes:${width}x${height} srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate SRC:$(basename $src)"
+		local info="codecId:$codecId srcRes:${width}x${height} srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset SRC:$(basename $src)"
 		print_info "$info"
 
 		mkdir -p "$(dirname "$dst")"
@@ -166,8 +174,9 @@ entrypoint()
 
 		rm -f "$recon"
 
-		local TAG="$(basename $src).QP=$qp.BR=$bitrate"
+		local TAG="$(basename $src).QP=$qp.BR=$bitrate.preset=$preset"
 		print_report "extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg kbps:$kbps $framestat $info TAG:$TAG"
+	done
 	done
 	done
 	done
@@ -246,7 +255,7 @@ print_header()
 	printf 	-v str    "%6s %6s %5s %5s"                 extFPS intFPS cpu% kbps
 	printf 	-v str "%s %3s %7s %6s %4s"          "$str" '#I' avg-I avg-P peak 
 	printf 	-v str "%s %6s %6s %6s %6s"          "$str" gPSNR psnr-I psnr-P gSSIM
-	printf 	-v str "%s %-8s %11s %5s %2s %6s %s" "$str" codecId resolution '#frm' QP BR SRC
+	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %s" "$str" codecId resolution '#frm' QP BR PRESET SRC
 
 	echo_console "$str" "\n"
 
@@ -262,13 +271,14 @@ print_info()
 	local srcNumFr=$(dict_getValue "$dict" srcNumFr)
 	local QP=$(dict_getValue "$dict" QP)
 	local BR=$(dict_getValue "$dict" BR)
+	local PRESET=$(dict_getValue "$dict" PRESET)
 	local SRC=$(dict_getValue "$dict" SRC)
 
 	local str=
 	printf 	-v str    "%6s %6s %5s %5s"                 "" "" "" ""
 	printf 	-v str "%s %3s %7s %6s %4s"          "$str" "" "" "" ""
 	printf 	-v str "%s %6s %6s %6s %6s"          "$str" "" "" "" ""
-	printf 	-v str "%s %-8s %11s %5s %2s %6s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$SRC"
+	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$SRC"
 
 	echo_console "$str" "\r"
 }
@@ -297,14 +307,14 @@ print_report()
 	local srcNumFr=$(dict_getValue "$dict" srcNumFr)
 	local QP=$(dict_getValue "$dict" QP)
 	local BR=$(dict_getValue "$dict" BR)
+	local PRESET=$(dict_getValue "$dict" PRESET)
 	local SRC=$(dict_getValue "$dict" SRC)
-	local TAG=$(dict_getValue "$dict" TAG)
 
 	local str=
 	printf 	-v str    "%6s %6.0f %5.0f %5.0f"           "$extFPS" "$intFPS" "$cpu" "$kbps"
 	printf 	-v str "%s %3d %7d %6d %4.1f"        "$str" "$numI" "$avgI" "$avgP" "$peak"
 	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f"  "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
-	printf 	-v str "%s %-8s %11s %5d %2s %6s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$SRC"
+	printf 	-v str "%s %-8s %11s %5d %2s %6s %9s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$SRC"
 
 	echo_console "$str" "\n"
 	echo "$str" >> $REPORT
@@ -503,6 +513,25 @@ parse_stdoutLog()
 	echo "$fps"
 }
 
+codec_default_preset()
+{
+	local codecId=$1; shift
+	local preset=
+
+	case $codecId in
+		ashevc) 	preset=1;;
+		x265) 		preset=ultrafast;;
+		kvazaar) 	preset=ultrafast;;
+		kingsoft)	preset=superfast;;
+		intel_*)	preset=faster;;
+		h265demo)	preset=5;;
+		h264demo)	preset=-;;
+		*) echo "unknown encoder($LINENO): $codecId" >&2 && exit 1;;
+	esac
+
+	echo "$preset"
+}
+
 cmd_x265()
 {
 	local args= threads=0
@@ -535,14 +564,14 @@ cmd_x265()
 
 cmd_ashevc()
 {
-	local args= threads=1 res=
+	local args= threads=1 res= preset=5
 	while [ "$#" -gt 0 ]; do
 		case $1 in
 			-i|--input) 	args="$args --input $2";;
 			-o|--output) 	args="$args --output $2";;
 			   --res) 		res=$2;;
 			   --fps) 		args="$args --fps $2";;
-			   --preset) 	args="$args --preset $2";; # 1 ~ 6: 1 is fastest, 6 is slowest. default 5
+			   --preset) 	preset=$2;; # 1 ~ 6: 1 is fastest, 6 is slowest. default 5
 			   --qp)     	args="$args --qp $2      --rc 12";; # rc=12: CQP
 			   --bitrate)   args="$args --bitrate $2 --rc 8";;  # rc=8: ABR
 			   --threads)   threads=$2;;
@@ -554,6 +583,7 @@ cmd_ashevc()
 	local height=${res##*x}
 	args="$args --width $width"
 	args="$args --height $height"
+	args="$args --preset $preset"   # Must be explicitly set
 
 	args="$args --wpp-threads $threads" # 0: Process everything with main thread.
 	args="$args --ref 1"           	# Num reference frames
@@ -668,14 +698,14 @@ cmd_intel_hw()
 
 cmd_h265demo()
 {
-	local args= threads=1 res= dst= fps=
+	local args= threads=1 res= dst= fps= preset=6
 	while [ "$#" -gt 0 ]; do
 		case $1 in
 			-i|--input) 	args="$args -i $2";;
 			-o|--output) 	args="$args -b $2" dst=$2;;
 			   --res) 		res=$2;;
 			   --fps) 		fps=$2;;
-#			   --preset) 	args="$args -preset $2";; # default, dss, conference, gaming
+			   --preset) 	preset=$2;; # 0-7 or 1-7
 #			   --preset)	args="$args -u $2";; # usage: veryslow(quality), slower, slow, medium(balanced), fast, faster, veryfast(speed)
 			   --qp)     	args="$args -rc 2 -qp $2";;
 			   --bitrate)   args="$args -rc 0 -br $2";;
@@ -723,7 +753,7 @@ cmd_h265demo()
 		LookAheadThreads = 1
 		EtoEDelayTime = 0
 		DelayNum = 0
-		Preset = 7
+		Preset = $preset
 		Tune = 0
 		DebugLevel = 1
 		PvcLevel = 0
