@@ -7,6 +7,7 @@ REPORT=report.log
 REPORT_KW=report_kw.log
 CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
 PRESETS=
+THREADS=1
 VECTORS="
 	$dirScript/../vectors/akiyo_cif.yuv
 	$dirScript/../vectors/foreman_cif.yuv
@@ -35,6 +36,7 @@ usage()
 	    -d|--dir      Output directory. Default: "$DIR_OUT"
 	    -o|--output   Report path.
 	    -c|--codec    Codecs list. Default: "$CODECS".
+	    -t|--threads  Number of threads to use
 	    -p|--prms     Bitrate (kbps) or QP list. Default: "$PRMS".
 	       --preset   Codec-specific list of 'preset' options (default: marked by *):
 	                  ashevc:   *1 2 3 4 5 6
@@ -52,7 +54,7 @@ usage()
 
 entrypoint()
 {
-	local cmd_vec= cmd_report= cmd_codecs= cmd_prms= cmd_presets= cmd_dirOut=
+	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut=
 	local hide_banner=
 	while [ "$#" -gt 0 ]; do
 		local nargs=2
@@ -62,6 +64,7 @@ entrypoint()
 			-d|--dir)		cmd_dirOut=$2;;
 			-o|--out*) 		cmd_report=$2;;
 			-c|--codec*) 	cmd_codecs=$2;;
+			-t|--thread*)   cmd_threads=$2;;
 			-p|--prm*) 		cmd_prms=$2;;
 			   --pre*) 		cmd_presets=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
@@ -73,6 +76,7 @@ entrypoint()
 	[ -n "$cmd_report" ] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}_kw.${REPORT##*.}
 	[ -n "$cmd_vec" ] && VECTORS=${cmd_vec# }
 	[ -n "$cmd_codecs" ] && CODECS=$cmd_codecs
+	[ -n "$cmd_threads" ] && THREADS=$cmd_threads
 	[ -n "$cmd_prms" ] && PRMS=$cmd_prms
 	[ -n "$cmd_presets" ] && PRESETS=$cmd_presets
 
@@ -132,14 +136,14 @@ entrypoint()
 		rm -rf "$dst" "$recon"
 
 		# argument		
-		set -- -i "$src" -o "$dst" --res "$srcRes" --fps $srcFps
+		set -- -i "$src" -o "$dst" --res "$srcRes" --fps $srcFps --threads $THREADS
 		[ $bitrate == '-' ] || set -- "$@" --bitrate $bitrate
 		[ $qp == '-' ]      || set -- "$@" --qp $qp
 		[ $preset == '-' ] || set -- "$@" --preset $preset
 
 		local cmd=
 		cmd=$(cmd_${codecId} "$@")
-		local info="codecId:$codecId srcRes:${width}x${height} srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset SRC:$(basename $src)"
+		local info="codecId:$codecId srcRes:${width}x${height} srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset TH:$THREADS SRC:$(basename $src)"
 		print_info "$info"
 
 		mkdir -p "$(dirname "$dst")"
@@ -243,6 +247,7 @@ print_legend()
 		gSSIM      - Global SSIM in dB: -10*log10(1-ssim)
 		QP         - QP value for fixed QP mode
 		BR         - Target bitrate.
+		TH         - Threads number.
 	EOT
 	)
 
@@ -255,7 +260,7 @@ print_header()
 	printf 	-v str    "%6s %6s %5s %5s"                 extFPS intFPS cpu% kbps
 	printf 	-v str "%s %3s %7s %6s %4s"          "$str" '#I' avg-I avg-P peak 
 	printf 	-v str "%s %6s %6s %6s %6s"          "$str" gPSNR psnr-I psnr-P gSSIM
-	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %s" "$str" codecId resolution '#frm' QP BR PRESET SRC
+	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %2s %s" "$str" codecId resolution '#frm' QP BR PRESET TH SRC
 
 	echo_console "$str" "\n"
 
@@ -272,13 +277,14 @@ print_info()
 	local QP=$(dict_getValue "$dict" QP)
 	local BR=$(dict_getValue "$dict" BR)
 	local PRESET=$(dict_getValue "$dict" PRESET)
+	local TH=$(dict_getValue "$dict" TH)
 	local SRC=$(dict_getValue "$dict" SRC)
 
 	local str=
 	printf 	-v str    "%6s %6s %5s %5s"                 "" "" "" ""
 	printf 	-v str "%s %3s %7s %6s %4s"          "$str" "" "" "" ""
 	printf 	-v str "%s %6s %6s %6s %6s"          "$str" "" "" "" ""
-	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$SRC"
+	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %2s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$TH" "$SRC"
 
 	echo_console "$str" "\r"
 }
@@ -308,13 +314,14 @@ print_report()
 	local QP=$(dict_getValue "$dict" QP)
 	local BR=$(dict_getValue "$dict" BR)
 	local PRESET=$(dict_getValue "$dict" PRESET)
+	local TH=$(dict_getValue "$dict" TH)
 	local SRC=$(dict_getValue "$dict" SRC)
 
 	local str=
 	printf 	-v str    "%6s %6.0f %5.0f %5.0f"           "$extFPS" "$intFPS" "$cpu" "$kbps"
 	printf 	-v str "%s %3d %7d %6d %4.1f"        "$str" "$numI" "$avgI" "$avgP" "$peak"
 	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f"  "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
-	printf 	-v str "%s %-8s %11s %5d %2s %6s %9s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$SRC"
+	printf 	-v str "%s %-8s %11s %5d %2s %6s %9s %2s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$TH" "$SRC"
 
 	echo_console "$str" "\n"
 	echo "$str" >> $REPORT
