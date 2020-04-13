@@ -115,7 +115,7 @@ entrypoint()
 		else
 			bitrate=$prm
 		fi
-		[ $preset == '-' ] && preset=$(codec_default_preset "$codecId")
+		[ $preset == '-' ] && codec_default_preset "$codecId" && preset=$REPLY
 
 		local srcRes=$(detect_resolution_string "$src")
 		[ -z "$srcRes" ] && error_exit "can't detect resolution for $src"
@@ -134,10 +134,10 @@ entrypoint()
 		[ $preset == '-' ] || args="$args --preset $preset"
 
 		local encExe= encExeHash= encCmdArgs= encCmdHash=
-		encExe=$(codec_exe $codecId)
-		encExeHash=$(codec_hash $codecId)
-		encCmdArgs=$(codec_cmdArgs $codecId $args)
-		encCmdHash=$(codec_cmdHash "$src" $encCmdArgs)
+		codec_exe $codecId && encExe=$REPLY
+		codec_hash $codecId && encExeHash=$REPLY
+		codec_cmdArgs $codecId $args && encCmdArgs=$REPLY
+		codec_cmdHash "$src" $encCmdArgs && encCmdHash=$REPLY
 		local outputDir="$DIR_OUT/$encExeHash/$encCmdHash"
 		local dst="$outputDir/$(basename "$src").$ext"
 		local stdoutLog="$outputDir/stdout.log"
@@ -154,8 +154,8 @@ entrypoint()
 			mkdir -p "$(dirname "$dst")"
 
 			local encCmdSrc= encCmdDst=
-			encCmdSrc=$(codec_cmdSrc $codecId "$src")
-			encCmdDst=$(codec_cmdDst $codecId "$dst")
+			codec_cmdSrc $codecId "$src" && encCmdSrc=$REPLY
+			codec_cmdDst $codecId "$dst" && encCmdDst=$REPLY
 			{
 				echo "$codecId"
 				echo "$encCmdArgs"
@@ -566,44 +566,49 @@ codec_default_preset()
 		*) error_exit "unknown encoder: $codecId";;
 	esac
 
-	echo "$preset"
+	REPLY=$preset
 }
 codec_exe()
 {
 	local codecId=$1; shift
 	local encoderExe=$(exe_${codecId})
 	[ -f "$encoderExe" ] || error_exit "encoder does not exist '$encoderExe'"
-	echo "$encoderExe"
+	REPLY=$encoderExe
 }
 codec_hash()
 {
-	local codecId=$1; encoderExe= hash=
-	encoderExe=$(codec_exe $codecId)
-	hash=$(md5sum ${encoderExe//\\//} | cut -d' ' -f 1 | base64)
-	echo "${codecId}_${hash::8}"
+	local codecId=$1 encoderExe= hash=
+	codec_exe $codecId && encoderExe=$REPLY
+	eval "hash=\${${codecId}_hash:-}"
+	if [ -z "$hash" ]; then
+		hash=$(md5sum ${encoderExe//\\//} | cut -d' ' -f 1 | base64)
+		hash=${codecId}_${hash::8}
+		eval "${codecId}_hash=$hash"
+	fi
+	REPLY=$hash
 }
 codec_cmdArgs()
 {
 	local codecId=$1; shift
-	cmd_${codecId} "$@"
+	REPLY=$(cmd_${codecId} "$@")
 }
 codec_cmdHash()
 {
 	local src=$1; shift
 	local args=$*; shift
-	echo "$(basename "$src") $args" | md5sum | base64
+	REPLY=$(echo "$(basename "$src") $args" | md5sum | base64)
 }
 codec_cmdSrc()
 {
 	local codecId=$1; shift
 	local src=$1; shift
-	src_${codecId} "$src"
+	REPLY=$(src_${codecId} "$src")
 }
 codec_cmdDst()
 {
 	local codecId=$1; shift
 	local dst=$1; shift
-	dst_${codecId} "$dst"
+	REPLY=$(dst_${codecId} "$dst")
 }
 
 exe_x265() { echo "$x265EncoderExe"; }
