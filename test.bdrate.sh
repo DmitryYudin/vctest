@@ -24,13 +24,12 @@ case 1 in
 esac
 
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-readonly dirLog=out/bdrate
-readonly report="$dirLog/bdrate_$timestamp.log"
+readonly report="report/bdrate_$timestamp.log"
 
 # Generate logs
 VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
-./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "$PRMS" -d "$dirLog/out" -o "$report"
+./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "$PRMS" -o "$report"
 
 # Calcultate BD-rate
 echo "$timestamp" >> bdrate.log
-./core/bdrate.sh -c ashevc -i $dirLog/bdrate_${timestamp}_kw.log | tee -a bdrate.log
+./core/bdrate.sh -c ashevc -i ${report%.*}.kw | tee -a bdrate.log

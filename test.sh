@@ -17,4 +17,4 @@ case 0 in
 esac
 
 VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
-./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "${QP:-} ${BITRATE:-}"
+./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "${QP:-} ${BITRATE:-}" -o report/report.log

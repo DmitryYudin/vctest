@@ -9,7 +9,7 @@ VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
 HIDE_BANNER=
 encode() {
 	./core/testbench.sh -i "$VECTORS" -c "$codec" -p "${QP:-} ${BITRATE:-}" --preset "$PRESET" \
-		-o preset.log -d out/preset ${HIDE_BANNER:+ --hide}
+		-o report/preset.log ${HIDE_BANNER:+ --hide}
 	HIDE_BANNER=1
 }
 

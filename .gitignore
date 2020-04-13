@@ -11,6 +11,7 @@ build*/
 *.wav
 *.pcm
 *.log
+*.kw
 *.bit
 *.bits
 *.cfg
@@ -24,4 +25,5 @@ testplan.txt
 out*/
 *tmp*/
 *result*/
+report/
 __pycache__

@@ -10,7 +10,7 @@ encode() {
 	local THREADS="1 2 3 4 5 6"
 	for i in $THREADS; do
 		./core/testbench.sh --threads $i -i "$VECTORS" -c "$codec" -p "${QP:-} ${BITRATE:-}" ${PRESET:+ --preset "$PRESET"} \
-			-o threads{PRESET:+_preset}.log -d out/threads ${HIDE_BANNER:+ --hide}
+			-o report/threads${PRESET:+_preset}.log ${HIDE_BANNER:+ --hide}
 		HIDE_BANNER=1
 	done
 }

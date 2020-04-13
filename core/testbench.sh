@@ -7,7 +7,7 @@ readonly dirScript=$(cygpath -m "$dirScript")
 
 PRMS="28 34 39 44"
 REPORT=report.log
-REPORT_KW=report_kw.log
+REPORT_KW=${REPORT%.*}.kw
 CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
 PRESETS=
 THREADS=1
@@ -76,7 +76,7 @@ entrypoint()
 		shift $nargs
 	done
 	[ -n "$cmd_dirOut" ] && DIR_OUT=$cmd_dirOut
-	[ -n "$cmd_report" ] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}_kw.${REPORT##*.}
+	[ -n "$cmd_report" ] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}.kw
 	[ -n "$cmd_vec" ] && VECTORS=${cmd_vec# }
 	[ -n "$cmd_codecs" ] && CODECS=$cmd_codecs
 	[ -n "$cmd_threads" ] && THREADS=$cmd_threads
