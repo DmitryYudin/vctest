@@ -83,7 +83,7 @@ entrypoint()
 	[ -n "$cmd_prms" ] && PRMS=$cmd_prms
 	[ -n "$cmd_presets" ] && PRESETS=$cmd_presets
 
-	mkdir -p "$DIR_OUT"
+	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
 
 	# Make sure we can run intel hardware encoder
 	if echo "$CODECS" | grep -i 'intel_hw' > /dev/null; then
@@ -115,6 +115,7 @@ entrypoint()
 		else
 			bitrate=$prm
 		fi
+		[ $preset == '-' ] && preset=$(codec_default_preset "$codecId")
 
 		local srcRes=$(detect_resolution_string "$src")
 		[ -z "$srcRes" ] && error_exit "can't detect resolution for $src"
@@ -127,62 +128,80 @@ entrypoint()
 
 		local ext=h265; [ $codecId == h264demo ] && ext=h264
 
-		local dst=
-		if [ $bitrate == '-' ]; then
-			dst=$DIR_OUT/$codecId/"$(basename "$src")".qp=$qp.$ext
-		else
-			dst=$DIR_OUT/$codecId/"$(basename "$src")".br=$bitrate.$ext
-		fi
-		[ $preset == '-' ] && preset=$(codec_default_preset "$codecId")
+		local args="--res "$srcRes" --fps $srcFps --threads $THREADS"
+		[ $bitrate == '-' ] || args="$args --bitrate $bitrate"
+		[ $qp == '-' ]     || args="$args --qp $qp"
+		[ $preset == '-' ] || args="$args --preset $preset"
 
-		local recon=$dst.yuv
-		rm -rf "$dst" "$recon"
+		local encExe= encExeHash= encCmdArgs= encCmdHash=
+		encExe=$(codec_exe $codecId)
+		encExeHash=$(codec_hash $codecId)
+		encCmdArgs=$(codec_cmdArgs $codecId $args)
+		encCmdHash=$(codec_cmdHash "$src" $encCmdArgs)
+		local outputDir="$DIR_OUT/$encExeHash/$encCmdHash"
+		local dst="$outputDir/$(basename "$src").$ext"
+		local stdoutLog="$outputDir/stdout.log"
+		local cpuLog="$outputDir/cpu.log"
+		local fpsLog="$outputDir/fps.log"
 
-		# argument		
-		set -- -i "$src" -o "$dst" --res "$srcRes" --fps $srcFps --threads $THREADS
-		[ $bitrate == '-' ] || set -- "$@" --bitrate $bitrate
-		[ $qp == '-' ]      || set -- "$@" --qp $qp
-		[ $preset == '-' ] || set -- "$@" --preset $preset
-
-		local cmd=
-		cmd=$(cmd_${codecId} "$@")
-		local info="codecId:$codecId srcRes:${width}x${height} srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset TH:$THREADS SRC:$(basename $src)"
+		local info="codecId:$codecId srcRes:${width}x${height} srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset"
+		info="$info TH:$THREADS SRC:$(basename $src) encCmdHash:$encCmdHash"
 		output_info "$info"
 
-		mkdir -p "$(dirname "$dst")"
-		local stdoutLog=${dst%.*}.log
-		echo "$codecId" > $stdoutLog
-		echo "$cmd" >> $stdoutLog
+		if [ ! -f "$outputDir/encoded.ts" ]; then
 
-		# Start CPU monitor
-		start_cpu_monitor "$codecId" "$dst"
+			rm -rf "$(dirname "$dst")/"
+			mkdir -p "$(dirname "$dst")"
 
-		# Encode
-		local consumedSec=$(date +%s%3N) # seconds*1000
+			local encCmdSrc= encCmdDst=
+			encCmdSrc=$(codec_cmdSrc $codecId "$src")
+			encCmdDst=$(codec_cmdDst $codecId "$dst")
+			{
+				echo "$codecId"
+				echo "$encCmdArgs"
+				echo "$encCmdSrc"
+				echo "$encCmdDst"
+			} > $stdoutLog
+			local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
 
-		if ! { echo "yes" | $cmd ;} 1>>$stdoutLog 2>&1 ; then
-			[ -t 2 ] && echo "" # newline if stdout==tty
-			cat "$stdoutLog" >&2
-			error_exit "encoding error, see logs above"
+			# Start CPU monitor
+			trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
+			start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
+
+			# Encode
+			local consumedSec=$(date +%s%3N) # seconds*1000
+			if ! { echo "yes" | $cmd; } 1>>$stdoutLog 2>&1 || [ ! -f "$dst" ]; then
+				echo "" # newline if stderr==tty
+				cat "$stdoutLog" >&2
+				error_exit "encoding error, see logs above"
+			fi
+			consumedSec=$(( $(date +%s%3N) - consumedSec ))
+
+			# Stop CPU monitor
+			stop_cpu_monitor
+			trap -- EXIT
+
+			local fps=0
+			[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
+			echo "$fps" > $fpsLog
+
+			echo "$(date "+%Y.%m.%d-%H.%M.%S")" > $outputDir/encoded.ts
 		fi
-		consumedSec=$(( $(date +%s%3N) - consumedSec ))
 
-		# Stop CPU monitor
-		local cpuAvg=$(stop_cpu_monitor "$dst")
+		if [ ! -f "$outputDir/decoded.ts" ]; then
 
-		# Reconstruct
-		$ffmpegExe -loglevel error -i "$dst" "$recon"
+            decode "$src" "$dst" "$outputDir"
 
-		local extFPS=0
-		[ $consumedSec != 0 ] && extFPS=$(( 1000*srcNumFr/consumedSec ))
+			echo "$(date "+%Y.%m.%d-%H.%M.%S")" > $outputDir/decoded.ts
+		fi
+
+		local cpuAvg=$(parse_cpuLog "$cpuLog")
+		local extFPS=$(cat "$fpsLog")
 		local intFPS=$(parse_stdoutLog $stdoutLog)
 		local kbps=$(parse_kbps "$dst" "$srcNumFr" "$srcFps")
-		local framestat=$(parse_framestat "$src" "$dst" "$recon" "$srcRes")
+		local framestat=$(parse_framestat "$outputDir")
 
-		rm -f "$recon"
-
-		local TAG="$(basename $src).QP=$qp.BR=$bitrate.preset=$preset"
-		output_report "extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg kbps:$kbps $framestat $info TAG:$TAG"
+		output_report "extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg kbps:$kbps $framestat $info"
 	done
 	done
 	done
@@ -193,7 +212,7 @@ PERF_ID=
 start_cpu_monitor()
 {
 	local codecId=$1; shift
-	local dst=$1; shift
+	local cpuLog=$1; shift
 
 	local encoderExe=
 	case $codecId in
@@ -207,22 +226,15 @@ start_cpu_monitor()
 		*) echo "unknown codec($LINENO): $codecId" >&2 && return 1 ;;
 	esac
 
-	local cpuLog=${dst%.*}.cpu.log
 	local name=$(basename "$encoderExe"); name=${name%.*}
-	typeperf '\Process('$name')\% Processor Time' > $cpuLog &
+	typeperf '\Process('$name')\% Processor Time' &
 	PERF_ID=$!
 }
 stop_cpu_monitor()
 {
-	local dst=$1; shift
-
+	[ -z "$PERF_ID" ] && return 0
 	{ kill -s INT $PERF_ID && wait $PERF_ID; } || true 
 	PERF_ID=
-
-	local cpuLog=${dst%.*}.cpu.log
-	local cpuAvg=$(parse_cpuLog $cpuLog)
-	
-	echo "$cpuAvg"
 }
 
 output_legend()
@@ -252,10 +264,11 @@ output_legend()
 output_header()
 {
 	local str=
-	printf 	-v str    "%6s %6s %5s %5s"                 extFPS intFPS cpu% kbps
-	printf 	-v str "%s %3s %7s %6s %4s"          "$str" '#I' avg-I avg-P peak 
-	printf 	-v str "%s %6s %6s %6s %6s"          "$str" gPSNR psnr-I psnr-P gSSIM
-	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %2s %s" "$str" codecId resolution '#frm' QP BR PRESET TH SRC
+	printf 	-v str    "%6s %6s %5s %5s"                extFPS intFPS cpu% kbps
+	printf 	-v str "%s %3s %7s %6s %4s"         "$str" '#I' avg-I avg-P peak 
+	printf 	-v str "%s %6s %6s %6s %6s"         "$str" gPSNR psnr-I psnr-P gSSIM
+	printf 	-v str "%s %-8s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
+	printf 	-v str "%s %9s %2s %-16s %s" 		"$str" PRESET TH HASH SRC
 
 	print_console "$str\n"
 
@@ -274,12 +287,14 @@ output_info()
 	local PRESET=$(dict_getValue "$dict" PRESET)
 	local TH=$(dict_getValue "$dict" TH)
 	local SRC=$(dict_getValue "$dict" SRC)
+	local HASH=$(dict_getValue "$dict" encCmdHash)
 
 	local str=
-	printf 	-v str    "%6s %6s %5s %5s"                 "" "" "" ""
-	printf 	-v str "%s %3s %7s %6s %4s"          "$str" "" "" "" ""
-	printf 	-v str "%s %6s %6s %6s %6s"          "$str" "" "" "" ""
-	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %2s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$TH" "$SRC"
+	printf 	-v str    "%6s %6s %5s %5s"                "" "" "" ""
+	printf 	-v str "%s %3s %7s %6s %4s"         "$str" "" "" "" ""
+	printf 	-v str "%s %6s %6s %6s %6s"         "$str" "" "" "" ""
+	printf 	-v str "%s %-8s %11s %5s %2s %6s" 	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
+	printf 	-v str "%s %9s %2s %-16s %s"  		"$str" "$PRESET" "$TH" "${HASH::16}" "$SRC"
 
 	print_console "$str\r"
 }
@@ -311,48 +326,52 @@ output_report()
 	local PRESET=$(dict_getValue "$dict" PRESET)
 	local TH=$(dict_getValue "$dict" TH)
 	local SRC=$(dict_getValue "$dict" SRC)
+	local HASH=$(dict_getValue "$dict" encCmdHash)
 
 	local str=
-	printf 	-v str    "%6s %6.0f %5.0f %5.0f"           "$extFPS" "$intFPS" "$cpu" "$kbps"
-	printf 	-v str "%s %3d %7d %6d %4.1f"        "$str" "$numI" "$avgI" "$avgP" "$peak"
-	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f"  "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
-	printf 	-v str "%s %-8s %11s %5d %2s %6s %9s %2s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$TH" "$SRC"
+	printf 	-v str    "%6s %6.0f %5.0f %5.0f"          "$extFPS" "$intFPS" "$cpu" "$kbps"
+	printf 	-v str "%s %3d %7.0f %6.0f %4.1f"   "$str" "$numI" "$avgI" "$avgP" "$peak"
+	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f" "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
+	printf 	-v str "%s %-8s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
+	printf 	-v str "%s %9s %2s %-16s %s" 		"$str" "$PRESET" "$TH" "${HASH::16}" "$SRC"
 
 	print_console "$str\n"
 	echo "$str" >> $REPORT
 }
 
-parse_framestat()
+decode()
 {
 	local src=$1; shift
-	local compr=$1; shift
-	local recon=$1; shift
-	local res=$1; shift
-	local summary="${compr%.*}.summary.log"
-	local dirRaw="$(dirname $compr)/raw"
-	local frameinfo="$dirRaw/$(basename "$compr").frame.info.log"
-	local framessim="$dirRaw/"$(basename "$compr")".frame.ssim.log"
-	local framepsnr="$dirRaw/"$(basename "$compr")".frame.psnr.log"
-	local frametype="$dirRaw/"$(basename "$compr")".frame.type.log"
+	local dst=$1; shift
+	local outputDir=$1; shift
 
-	mkdir -p "$dirRaw"
+	local recon="$outputDir/$(basename "$dst").yuv"
+	local infoLog="$outputDir/info.log"
+	local ssimLog="$outputDir/ssim.log"
+	local psnrLog="$outputDir/psnr.log"
+	local frameLog="$outputDir/frame.log"
+	local summaryLog="$outputDir/summary.log"
 
-	# can't pass 'C:/...' to ffmpeg filter args, use temporary file
-	local framessimTmp=$(basename $framessim)
+	local srcRes=$(detect_resolution_string "$src")
+
+	$ffmpegExe -y -loglevel error -i "$dst" "$recon"        
+	$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $infoLog
+    			
+	local ssimTmp=$(basename $ssimLog) # can't pass 'C:/...' to ffmpeg filter args, use temporary file
 	{   # ignore output
-		$ffmpegExe -hide_banner -s $res -i "$src" -s $res -i "$recon" -lavfi "ssim=stats_file=$framessimTmp" -f null - 2>&1 \
+		$ffmpegExe -hide_banner -s $srcRes -i "$src" -s $srcRes -i "$recon" -lavfi "ssim=stats_file=$ssimTmp" -f null - 2>&1 \
 			| grep '\[Parsed_' | sed 's/.*SSIM //'
 	} > /dev/null
-	cat "$framessimTmp" | tr -d $'\r' > "$framessim" && rm "$framessimTmp"
+	cat "$ssimTmp" | tr -d $'\r' > "$ssimLog" && rm "$ssimTmp"
 
-	local framepsnrTmp=$(basename $framepsnr)
+	local psnrTmp=$(basename $psnrLog)
 	{   # ignore output
-		$ffmpegExe -hide_banner -s $res -i "$src" -s $res -i "$recon" -lavfi "psnr=stats_file=$framepsnrTmp" -f null - 2>&1 \
+		$ffmpegExe -hide_banner -s $srcRes -i "$src" -s $srcRes -i "$recon" -lavfi "psnr=stats_file=$psnrTmp" -f null - 2>&1 \
 			| grep '\[Parsed_' | sed 's/.*PSNR //'
 	} > /dev/null
-	cat "$framepsnrTmp" | tr -d $'\r' > "$framepsnr" && rm "$framepsnrTmp"
+	cat "$psnrTmp" | tr -d $'\r' > "$psnrLog" && rm "$psnrTmp"
 
-	$ffprobeExe -v error -show_frames -i "$compr" | tr -d $'\r' > $frameinfo
+	rm -f "$recon"
 
 	local numI=0 numP=0 sizeI=0 sizeP=0
 	{
@@ -376,11 +395,23 @@ parse_framestat()
 			esac
 			case $REPLY in pkt_size=*) size=${REPLY#pkt_size=}; esac
 			# echo $v
-		done < $frameinfo
-	} > $frametype
+		done < $infoLog
+	} > $frameLog
 
-	paste "$frametype" "$framepsnr" "$framessim" > $summary
+	paste "$frameLog" "$psnrLog" "$ssimLog" > $summaryLog
+}
 
+parse_framestat()
+{
+	local outputDir=$1; shift
+	local summaryLog="$outputDir/summary.log"
+
+	countTotal() { 
+		awk '{ cnt +=  1 } END { print cnt }'
+	}
+	countSum() { 
+		awk '{ sum += $1 } END { print sum }'
+	}
 	countAverage() { 
 		awk '{ sum += $1; cnt++ } END { print cnt !=0 ? sum / cnt : 0 }'
 	}
@@ -393,40 +424,43 @@ parse_framestat()
 
 	local psnrI= psnrP= gPSNR=
 	if [ 0 == 1 ]; then # Avg(FramePSNR)
-		psnrI=$( grep -i 'type:I' "$summary" | sed 's/.* psnr_avg:\([^ ]*\).*/\1/' | countAverage )
-		psnrP=$( grep -i 'type:P' "$summary" | sed 's/.* psnr_avg:\([^ ]*\).*/\1/' | countAverage )
+		psnrI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_avg:\([^ ]*\).*/\1/' | countAverage )
+		psnrP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_avg:\([^ ]*\).*/\1/' | countAverage )
 	else                # GlobalPSNR( Avg(Y), Avg(U), Avg(V) ) <= x265
-		local psnr_y=$( grep -i 'type:I' "$summary" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_u=$( grep -i 'type:I' "$summary" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_v=$( grep -i 'type:I' "$summary" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_y=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_u=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_v=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
 		psnrI=$(echo "$psnr_y" "$psnr_u" "$psnr_v" | countGlobalPSNR)
 
-		local psnr_y=$( grep -i 'type:P' "$summary" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_u=$( grep -i 'type:P' "$summary" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_v=$( grep -i 'type:P' "$summary" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_y=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_u=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_v=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
 		psnrP=$(echo "$psnr_y" "$psnr_u" "$psnr_v" | countGlobalPSNR)
 	fi
 	{
-		local psnr_y=$( cat "$summary" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_u=$( cat "$summary" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_v=$( cat "$summary" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_y=$( cat "$summaryLog" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_u=$( cat "$summaryLog" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
+		local psnr_v=$( cat "$summaryLog" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
 		gPSNR=$(echo "$psnr_y" "$psnr_u" "$psnr_v" | countGlobalPSNR)
 	}
 
 	local ssimI= ssimP= gSSIM=
 	if [ 0 == 1 ]; then # Full
-		ssimI=$( grep -i 'type:I' "$summary" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
-		ssimP=$( grep -i 'type:P' "$summary" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
-		gSSIM=$(              cat "$summary" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
+		ssimI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
+		ssimP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
+		gSSIM=$(              cat "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
 	else                # Luma <= x265 reports only Y-SSIM
-		ssimI=$( grep -i 'type:I' "$summary" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
-		ssimP=$( grep -i 'type:P' "$summary" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
-		gSSIM=$(              cat "$summary" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
+		ssimI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
+		ssimP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
+		gSSIM=$(              cat "$summaryLog" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
 	fi
 
-	local avgI=0 avgP=0
-	[ $numI != 0 ] && avgI=$(( sizeI / numI ))
-	[ $numP != 0 ] && avgP=$(( sizeP / numP ))
+	local numI=$(  grep -i 'type:I' "$summaryLog" | countTotal )
+	local sizeI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* size:\([^ ]*\).*/\1/' | countSum )
+	local avgI=$(  grep -i 'type:I' "$summaryLog" | sed 's/.* size:\([^ ]*\).*/\1/' | countAverage )
+	local numP=$(  grep -i 'type:P' "$summaryLog" | countTotal )
+	local sizeP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* size:\([^ ]*\).*/\1/' | countSum)
+	local avgP=$(  grep -i 'type:P' "$summaryLog" | sed 's/.* size:\([^ ]*\).*/\1/' | countAverage )
 	local peakFac=$(echo "$avgI $avgP" | awk '{ fac = $2 != 0 ? $1 / $2 : 0; print fac; }' )
 
 	x265_ssim2dB() {
@@ -516,7 +550,47 @@ codec_default_preset()
 
 	echo "$preset"
 }
+codec_exe()
+{
+	local codecId=$1; shift
+	local encoderExe=$(exe_${codecId})
+	[ -f "$encoderExe" ] || error_exit "encoder does not exist '$encoderExe'"
+	echo "$encoderExe"
+}
+codec_hash()
+{
+	local codecId=$1; encoderExe= hash=
+	encoderExe=$(codec_exe $codecId)
+	hash=$(md5sum ${encoderExe//\\//} | cut -d' ' -f 1 | base64)
+	echo "${codecId}_${hash::8}"
+}
+codec_cmdArgs()
+{
+	local codecId=$1; shift
+	cmd_${codecId} "$@"
+}
+codec_cmdHash()
+{
+	local src=$1; shift
+	local args=$*; shift
+	echo "$(basename "$src") $args" | md5sum | base64
+}
+codec_cmdSrc()
+{
+	local codecId=$1; shift
+	local src=$1; shift
+	src_${codecId} "$src"
+}
+codec_cmdDst()
+{
+	local codecId=$1; shift
+	local dst=$1; shift
+	dst_${codecId} "$dst"
+}
 
+exe_x265() { echo "$x265EncoderExe"; }
+src_x265() { echo "--input $1"; }
+dst_x265() { echo "--output $1"; }
 cmd_x265()
 {
 	local args= threads=0
@@ -544,9 +618,12 @@ cmd_x265()
 	args="$args --psnr"
 	args="$args --ssim"
 
-	echo "$x265EncoderExe $args"
+	echo "$args"
 }
 
+exe_ashevc() { echo "$ashevcEncoderExe"; }
+src_ashevc() { echo "--input $1"; }
+dst_ashevc() { echo "--output $1"; }
 cmd_ashevc()
 {
 	local args= threads=1 res= preset=5
@@ -578,10 +655,15 @@ cmd_ashevc()
 	args="$args --keyint 999999"	# Only first picture is intra.
 	args="$args --psnr 1"
 	args="$args --ssim 1"
+	args=${args# *}
+	args=${args// / }
 
-	echo "$ashevcEncoderExe $args"
-
+	echo "$args"
 }
+
+exe_kvazaar() { echo "$kvazaarEncoderExe"; }
+src_kvazaar() { echo "--input $1"; }
+dst_kvazaar() { echo "--output $1"; }
 cmd_kvazaar()
 {
 	local args= threads=0
@@ -606,9 +688,12 @@ cmd_kvazaar()
 	args="$args --owf 0" 			# Frame-level parallelism. Process N+1 frames at a time.
 	args="$args --period 0"         # Only first picture is intra.
 
-	echo "$kvazaarEncoderExe $args"
+	echo "${args# *}"
 }
 
+exe_kingsoft() { echo "$kingsoftEncoderExe"; }
+src_kingsoft() { echo "-i $1"; }
+dst_kingsoft() { echo "-b $1"; }
 cmd_kingsoft()
 {
 	local args= threads=1 res=
@@ -638,7 +723,7 @@ cmd_kingsoft()
 	args="$args -iper -1"         	# Only first picture is intra.
 #	args="$args -fpp 1" 			# TODO: enable frame level parallel
 
-	echo "$kingsoftEncoderExe $args"
+	echo "$args"
 }
 
 cmd_intel()
@@ -672,24 +757,34 @@ cmd_intel()
 	args="$args -x 1"         		# Number of reference frames
 #	args="$args -num_active_P 1"	# Number of maximum allowed references for P frames
 
-	echo "$intelEncoderExe h265 $args"
+	echo "h265 $args"
 }
+
+exe_intel_sw() { echo "$intelEncoderExe"; }
+src_intel_sw() { echo "-i $1"; }
+dst_intel_sw() { echo "-o $1"; }
 cmd_intel_sw()
 {
 	echo "$(cmd_intel "$@") -sw"
 }
+exe_intel_hw() { echo "$intelEncoderExe"; }
+src_intel_hw() { echo "-i $1"; }
+dst_intel_hw() { echo "-o $1"; }
 cmd_intel_hw() 
 {
 	echo "$(cmd_intel "$@") -hw"
 }
 
+exe_h265demo() { echo "$h265EncDemoExe"; }
+src_h265demo() { echo "-i $1"; }
+dst_h265demo() { echo "-b $1"; }
 cmd_h265demo()
 {
-	local args= threads=1 res= dst= fps= preset=6
+	local args= threads=1 res= fps= preset=6
 	while [ "$#" -gt 0 ]; do
 		case $1 in
 			-i|--input) 	args="$args -i $2";;
-			-o|--output) 	args="$args -b $2" dst=$2;;
+			-o|--output) 	args="$args -b $2";;
 			   --res) 		res=$2;;
 			   --fps) 		fps=$2;;
 			   --preset) 	preset=$2;; # 0-7 or 1-7
@@ -754,12 +849,19 @@ cmd_h265demo()
 		#ReconEnable = 1
 	END_OF_CFG
 	)
-	mkdir -p "$(dirname "$dst")"
-	echo "$cfg" > $dst.cfg
-
-	echo "$h265EncDemoExe -c $dst.cfg $args"
+	local hash=$(echo "$cfg" | md5sum | base64)
+	local _dirScript=$(cygpath -m "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")
+	local pathCfg="$_dirScript/persistent/h265demo-$hash.cfg"
+	if [ ! -f "$pathCfg" ]; then
+		mkdir -p "$(dirname "$pathCfg")"
+		echo "$cfg" > "$pathCfg"
+	fi
+	echo "-c $pathCfg $args"
 }
 
+exe_h264demo() { echo "$HW264_Encoder_DemoExe"; }
+src_h264demo() { echo "Source = $1"; }
+dst_h264demo() { echo "Destination = $1"; }
 cmd_h264demo()
 {
 	local args= threads=1 res= bitrateKbps=2000
