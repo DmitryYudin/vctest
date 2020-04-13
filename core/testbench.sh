@@ -162,6 +162,8 @@ entrypoint()
 				echo "$encCmdSrc"
 				echo "$encCmdDst"
 			} > $stdoutLog
+			echo "$src" > $outputDir/src
+			echo "$dst" > $outputDir/dst
 			local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
 
 			# Start CPU monitor
@@ -190,18 +192,27 @@ entrypoint()
 
 		if [ ! -f "$outputDir/decoded.ts" ]; then
 
-            decode "$src" "$dst" "$outputDir"
+            decode "$outputDir"
 
 			echo "$(date "+%Y.%m.%d-%H.%M.%S")" > $outputDir/decoded.ts
 		fi
 
-		local cpuAvg=$(parse_cpuLog "$cpuLog")
-		local extFPS=$(cat "$fpsLog")
-		local intFPS=$(parse_stdoutLog $stdoutLog)
-		local kbps=$(parse_kbps "$dst" "$srcNumFr" "$srcFps")
-		local framestat=$(parse_framestat "$outputDir")
+		if [ ! -f "$outputDir/report.ts" ]; then
+			local cpuAvg= extFPS= intFPS= framestat=
+			cpuAvg=$(parse_cpuLog "$cpuLog")
+			extFPS=$(cat "$fpsLog")
+			intFPS=$(parse_stdoutLog "$stdoutLog")
+			framestat=$(parse_framestat "$outputDir")
 
-		output_report "extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg kbps:$kbps $framestat $info"
+			local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg $framestat $info"
+
+			echo "$dict" > $outputDir/report.kw
+
+			echo "$(date "+%Y.%m.%d-%H.%M.%S")" > $outputDir/report.ts
+		fi
+
+		local dict=$(cat "$outputDir/report.kw")		
+		output_report "$dict"
 	done
 	done
 	done
@@ -341,11 +352,14 @@ output_report()
 
 decode()
 {
-	local src=$1; shift
-	local dst=$1; shift
 	local outputDir=$1; shift
 
+	local src= dst=
+	src=$(cat "$outputDir/src")
+	dst=$(cat "$outputDir/dst")
+
 	local recon="$outputDir/$(basename "$dst").yuv"
+	local kbpsLog="$outputDir/kbps.log"
 	local infoLog="$outputDir/info.log"
 	local ssimLog="$outputDir/ssim.log"
 	local psnrLog="$outputDir/psnr.log"
@@ -353,6 +367,12 @@ decode()
 	local summaryLog="$outputDir/summary.log"
 
 	local srcRes=$(detect_resolution_string "$src")
+	local srcFps=$(detect_framerate_string "$src")
+	local srcNumFr=$(detect_frame_num "$src" "$srcRes")
+
+	local sizeInBytes=$(stat -c %s "$dst") kbps=
+	kbps=$(awk "BEGIN { print 8 * $sizeInBytes / ($srcNumFr/$srcFps) / 1000 }")
+	echo "$kbps" > $kbpsLog
 
 	$ffmpegExe -y -loglevel error -i "$dst" "$recon"        
 	$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $infoLog
@@ -404,6 +424,7 @@ decode()
 parse_framestat()
 {
 	local outputDir=$1; shift
+	local kbpsLog="$outputDir/kbps.log"
 	local summaryLog="$outputDir/summary.log"
 
 	countTotal() { 
@@ -421,6 +442,9 @@ parse_framestat()
 	countGlobalPSNR() { # psnr_y psnr_y psnr_v -> globalPSNR
 		awk '{ print ( 6*$1 + $2 + $3 ) / 8 }'
 	}
+
+	local kbps=
+	kbps=$(cat "$kbpsLog")
 
 	local psnrI= psnrP= gPSNR=
 	if [ 0 == 1 ]; then # Avg(FramePSNR)
@@ -472,17 +496,11 @@ parse_framestat()
 	local gSSIM_en=$gSSIM
 	gSSIM=$gSSIM_db # report in dB, write to kw-report in linear and dB scale
  
-	echo 	"numI:$numI numP:$numP sizeI:$sizeI sizeP:$sizeP "\
+	echo 	"kbps:$kbps "\
+			"numI:$numI numP:$numP sizeI:$sizeI sizeP:$sizeP "\
 			"avgI:$avgI avgP:$avgP peak:$peakFac "\
 			"psnrI:$psnrI psnrP:$psnrP gPSNR:$gPSNR ssimI:$ssimI ssimP:$ssimP gSSIM:$gSSIM "\
 			"gSSIM_db:$gSSIM_db gSSIM_en:$gSSIM_en"
-}
-
-parse_kbps()
-{
-	local compressed=$1 numFrames=$2; fps=$3
-	local bytes=$(stat -c %s "$compressed")
-	awk "BEGIN { print 8 * $bytes / ($numFrames/$fps) / 1000 }"
 }
 
 parse_cpuLog()
