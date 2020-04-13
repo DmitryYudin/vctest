@@ -52,7 +52,7 @@ entrypoint()
 	local codec= codecs=
 	{
 		codecs=$(
-			cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:" | while read -r; do dict_getValue "$REPLY" codecId; done \
+			cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:" | while read -r; do dict_getValue "$REPLY" codecId && echo "$REPLY"; done \
 				| sort -u --ignore-leading-blanks --ignore-case | tr $'\n' ' '
 		)
 		[ -z "$codecs" ] && error_exit "no codecs found"
@@ -73,7 +73,7 @@ entrypoint()
 	local src= vectors=
 	{
 		vectors=$(
-			cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:" | while read -r; do dict_getValue "$REPLY" SRC; done \
+			cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:" | while read -r; do dict_getValue "$REPLY" SRC && echo "$REPLY"; done \
 				| sort -u --ignore-leading-blanks --ignore-case | tr $'\n' ' '
 		)
 	}
@@ -89,8 +89,9 @@ entrypoint()
 				refData=$(
 					cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:$REF_CODEC[ $]" | grep -i "${KEY_DELIM}SRC:$src[ $]" | \
 						while read -r; do 
-							kbps=$(dict_getValue "$REPLY" kbps)
-							psnr=$(dict_getValue "$REPLY" $key)
+							dict=$REPLY
+							dict_getValue "$dict" kbps && kbps=$REPLY
+							dict_getValue "$dict" $key && psnr=$REPLY
 							echo "--ref $kbps,$psnr"
 						done | \
 						tr $'\n' ' '
@@ -101,16 +102,17 @@ entrypoint()
 			tstData=$(
 				cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:$codec[ $]" | grep -i "${KEY_DELIM}SRC:$src[ $]" | \
 					while read -r; do 
-						kbps=$(dict_getValue "$REPLY" kbps)
-						psnr=$(dict_getValue "$REPLY" $key)
+						dict=$REPLY
+						dict_getValue "$dict" kbps && kbps=$REPLY
+						dict_getValue "$dict" $key && psnr=$REPLY
 						echo "--tst $kbps,$psnr"
 					done | \
 					tr $'\n' ' '
 			)
 			local result= bdRate= bdPSNR=
 			result=$(python $bdratePy $refData $tstData)
-			bdRate=$(dict_getValue "$result" BD-rate)
-			bdPSNR=$(dict_getValue "$result" BD-PSNR)
+			dict_getValue "$result" BD-rate && bdRate=$REPLY
+			dict_getValue "$result" BD-PSNR && bdPSNR=$REPLY
 			printf -v report "%s BD-rate($key):%-6.2f BD-PSNR($key):%-6.2f" "$report" "$bdRate" "$bdPSNR"
 		done
 		report=${report# }

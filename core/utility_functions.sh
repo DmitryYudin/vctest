@@ -21,7 +21,7 @@ dict_getValue()
 	local dict=$1 key=$2; val=${dict#*$key:};	
 	val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
 	val=${val%%[ $'\t']*} # Cut everything after left most whitespace
-	echo "$val"
+	REPLY=$val
 }
 
 # Works as print not 'echo', i.e. does not insert 'eol' character at the end of string.
@@ -60,24 +60,23 @@ print_console()
 detect_resolution_string()
 {	
 	local filename=$1; shift
-	local name=$(basename "$filename")
-	name=${name%%.*}
+	local name=${filename//\\/}; name=${name##*[/\\]}; name=${name%%.*}
 	local res=
 
-	# Upper case
-	name=$(echo "$name" | tr a-z A-Z)
+	# X -> x
+	name=${name//X/x}
 
 	# try HxW pattern delimited by "." or "_"
 	for delim in _ .; do
 		local IFS=$delim
 		for i in $name; do
-			if [[ "$i" =~ ^[1-9][0-9]{1,3}X[1-9][0-9]{1,3}$ ]]; then
+			if [[ "$i" =~ ^[1-9][0-9]{1,3}x[1-9][0-9]{1,3}$ ]]; then
 				res=$i && break
 			fi
 		done
 		[ -n "$res" ] && break
 	done
-	[ -n "$res" ] && { echo "$res" | tr X x; } && return
+	[ -n "$res" ] && REPLY=$res && return
 
 	# try abbreviations CIF, QCIF, ... delimited by "." or "_"
 	for delim in _ .; do
@@ -114,34 +113,32 @@ detect_resolution_string()
 		done
 		[ -n "$res" ] && break
 	done
-	[ -n "$res" ] && echo "$res" && return
+	[ -z "$res" ] && error_exit "can't detect resolution $filename"
 
-	error_exit "can't detect resolution $filename"
-	return 1
+	REPLY=$res
 }
 
 detect_framerate_string()
 {	
 	local filename=$1; shift
-	local name=$(basename "$filename")
-	name=${name%%.*}
+	local name=${filename//\\/}; name=${name##*[/\\]}; name=${name%%.*}
 	local framerate=
 
-	# Upper case
-	name=$(echo "$name" | tr a-z A-Z)
+	name=${name//FPS/fps}
 
 	# try XXX pattern delimited by "." or "_"
 	for delim in _ .; do
 		local IFS=$delim
 		for i in $name; do
-			if [[ "$i" =~ ^[1-9][0-9]{0,2}(FPS)?$ ]]; then
-				framerate=${i%FPS} && break
+			if [[ "$i" =~ ^[1-9][0-9]{0,2}(fps)?$ ]]; then
+				framerate=${i%fps} && break
 			fi
 		done
 		[ -n "$framerate" ] && break
 	done
 	[ -z "$framerate" ] && framerate=30
-	echo "$framerate"
+
+	REPLY=$framerate
 }
 
 detect_frame_num()
@@ -149,7 +146,7 @@ detect_frame_num()
 	local filename=$1; shift
 	local res=${1:-};
 	if [ -z "$res" ]; then
-		res=$(detect_resolution_string "$filename")
+		detect_resolution_string "$filename" && res=$REPLY
 	fi
 	[ -z "$res" ] && return
 
@@ -160,6 +157,7 @@ detect_frame_num()
 	local height=${res##*x}
 	local numFrames=$(( 2 * numBytes / width / height / 3 )) 
 	local numBytes2=$(( 3 * numFrames * width * height / 2 ))
-	[ $numBytes != $numBytes2 ] && echo error_exit "can't detect frames number $filename"
-	echo $numFrames
+	[ $numBytes != $numBytes2 ] && error_exit "can't detect frames number $filename"
+
+	REPLY=$numFrames
 }

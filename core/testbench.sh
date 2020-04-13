@@ -87,7 +87,12 @@ entrypoint()
 
 	# Make sure we can run intel hardware encoder
 	if echo "$CODECS" | grep -i 'intel_hw' > /dev/null; then
-		cmd=$(cmd_intel_hw -i "$0" -o "$DIR_OUT/out.tmp" --res "64x64" --fps 30)
+		local codecId=intel_hw cmd=
+		codec_exe $codecId && cmd=$REPLY
+		codec_cmdArgs $codecId --res 64x64 --fps 30 && cmd="$cmd $REPLY"
+		codec_cmdSrc $codecId "$0" && cmd="$cmd $REPLY"
+		codec_cmdDst $codecId "$DIR_OUT/out.tmp" && cmd="$cmd $REPLY"
+
 		if ! $cmd 1>/dev/null 2>&1; then
 			echo "warning: intel_hw encoder is not available" >&2;
 			CODECS=$(echo "$CODECS" | sed 's/intel_hw//')
@@ -117,14 +122,10 @@ entrypoint()
 		fi
 		[ $preset == '-' ] && codec_default_preset "$codecId" && preset=$REPLY
 
-		local srcRes=$(detect_resolution_string "$src")
-		[ -z "$srcRes" ] && error_exit "can't detect resolution for $src"
-		local srcFps=$(detect_framerate_string "$src")
-		local width=${srcRes%%x*}
-		local height=${srcRes##*x}
-
-		local srcNumFr=$(detect_frame_num "$src" "$srcRes")
-		[ -z "$srcNumFr" ] && error_exit "can't detect number of frames for $src"
+		local srcRes= srcFps= srcNumFr=
+		detect_resolution_string "$src" && srcRes=$REPLY
+		detect_framerate_string "$src" && srcFps=$REPLY
+		detect_frame_num "$src" "$srcRes" && srcNumFr=$REPLY
 
 		local ext=h265; [ $codecId == h264demo ] && ext=h264
 
@@ -139,13 +140,14 @@ entrypoint()
 		codec_cmdArgs $codecId $args && encCmdArgs=$REPLY
 		codec_cmdHash "$src" $encCmdArgs && encCmdHash=$REPLY
 		local outputDir="$DIR_OUT/$encExeHash/$encCmdHash"
-		local dst="$outputDir/$(basename "$src").$ext"
+		local SRC=${src//\\/}; SRC=${SRC##*[/\\]}
+		local dst="$outputDir/$SRC.$ext"
 		local stdoutLog="$outputDir/stdout.log"
 		local cpuLog="$outputDir/cpu.log"
 		local fpsLog="$outputDir/fps.log"
 
-		local info="codecId:$codecId srcRes:${width}x${height} srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset"
-		info="$info TH:$THREADS SRC:$(basename $src) encCmdHash:$encCmdHash"
+		local info="codecId:$codecId srcRes:$srcRes srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset"
+		info="$info TH:$THREADS SRC:$SRC encCmdHash:$encCmdHash"
 		output_info "$info"
 
 		if [ ! -f "$outputDir/encoded.ts" ]; then
@@ -187,14 +189,14 @@ entrypoint()
 			[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
 			echo "$fps" > $fpsLog
 
-			echo "$(date "+%Y.%m.%d-%H.%M.%S")" > $outputDir/encoded.ts
+			date "+%Y.%m.%d-%H.%M.%S" > $outputDir/encoded.ts
 		fi
 
 		if [ ! -f "$outputDir/decoded.ts" ]; then
 
             decode "$outputDir"
 
-			echo "$(date "+%Y.%m.%d-%H.%M.%S")" > $outputDir/decoded.ts
+			date "+%Y.%m.%d-%H.%M.%S" > $outputDir/decoded.ts
 		fi
 
 		if [ ! -f "$outputDir/report.ts" ]; then
@@ -208,7 +210,7 @@ entrypoint()
 
 			echo "$dict" > $outputDir/report.kw
 
-			echo "$(date "+%Y.%m.%d-%H.%M.%S")" > $outputDir/report.ts
+			date "+%Y.%m.%d-%H.%M.%S" > $outputDir/report.ts
 		fi
 
 		local dict=$(cat "$outputDir/report.kw")		
@@ -289,16 +291,18 @@ output_header()
 output_info()
 {
 	local dict="$*"
-	local codecId=$(dict_getValue "$dict" codecId)
-	local srcRes=$(dict_getValue "$dict" srcRes)
-	local srcFps=$(dict_getValue "$dict" srcFps)
-	local srcNumFr=$(dict_getValue "$dict" srcNumFr)
-	local QP=$(dict_getValue "$dict" QP)
-	local BR=$(dict_getValue "$dict" BR)
-	local PRESET=$(dict_getValue "$dict" PRESET)
-	local TH=$(dict_getValue "$dict" TH)
-	local SRC=$(dict_getValue "$dict" SRC)
-	local HASH=$(dict_getValue "$dict" encCmdHash)
+	local codecId= srcRes= srcFps= srcNumFr= QP= BR= PRESET= TH= SRC= HASH=
+
+	dict_getValue "$dict" codecId  && codecId=$REPLY
+	dict_getValue "$dict" srcRes   && srcRes=$REPLY
+	dict_getValue "$dict" srcFps   && srcFps=$REPLY
+	dict_getValue "$dict" srcNumFr && srcNumFr=$REPLY
+	dict_getValue "$dict" QP       && QP=$REPLY
+	dict_getValue "$dict" BR       && BR=$REPLY
+	dict_getValue "$dict" PRESET   && PRESET=$REPLY
+	dict_getValue "$dict" TH       && TH=$REPLY
+	dict_getValue "$dict" SRC      && SRC=$REPLY
+	dict_getValue "$dict" encCmdHash && HASH=$REPLY
 
 	local str=
 	printf 	-v str    "%6s %6s %5s %5s"                "" "" "" ""
@@ -316,28 +320,31 @@ output_report()
 
 	echo "$dict" >> $REPORT_KW
 
-	local extFPS=$(dict_getValue "$dict" extFPS)
-	local intFPS=$(dict_getValue "$dict" intFPS)
-	local cpu=$(dict_getValue "$dict" cpu)
-	local kbps=$(dict_getValue "$dict" kbps)
-	local numI=$(dict_getValue "$dict" numI)
-	local avgI=$(dict_getValue "$dict" avgI)
-	local avgP=$(dict_getValue "$dict" avgP)
-	local peak=$(dict_getValue "$dict" peak)
-	local gPSNR=$(dict_getValue "$dict" gPSNR)
-	local psnrI=$(dict_getValue "$dict" psnrI)
-	local psnrP=$(dict_getValue "$dict" psnrP)
-	local gSSIM=$(dict_getValue "$dict" gSSIM)
-	local codecId=$(dict_getValue "$dict" codecId)
-	local srcRes=$(dict_getValue "$dict" srcRes)
-	local srcFps=$(dict_getValue "$dict" srcFps)
-	local srcNumFr=$(dict_getValue "$dict" srcNumFr)
-	local QP=$(dict_getValue "$dict" QP)
-	local BR=$(dict_getValue "$dict" BR)
-	local PRESET=$(dict_getValue "$dict" PRESET)
-	local TH=$(dict_getValue "$dict" TH)
-	local SRC=$(dict_getValue "$dict" SRC)
-	local HASH=$(dict_getValue "$dict" encCmdHash)
+	local extFPS= intFPS= cpu= kbps= numI= avgI= avgP= peak= gPSNR= psnrI= psnrP= gSSIM=
+	local codecId= srcRes= srcFps= numFr= QP= BR= PRESET= TH= SRC= HASH=
+
+	dict_getValue "$dict" extFPS  && extFPS=$REPLY
+	dict_getValue "$dict" intFPS  && intFPS=$REPLY
+	dict_getValue "$dict" cpu     && cpu=$REPLY
+	dict_getValue "$dict" kbps    && kbps=$REPLY
+	dict_getValue "$dict" numI    && numI=$REPLY
+	dict_getValue "$dict" avgI    && avgI=$REPLY
+	dict_getValue "$dict" avgP    && avgP=$REPLY
+	dict_getValue "$dict" peak    && peak=$REPLY
+	dict_getValue "$dict" gPSNR   && gPSNR=$REPLY
+	dict_getValue "$dict" psnrI   && psnrI=$REPLY
+	dict_getValue "$dict" psnrP   && psnrP=$REPLY
+	dict_getValue "$dict" gSSIM   && gSSIM=$REPLY
+	dict_getValue "$dict" codecId  && codecId=$REPLY
+	dict_getValue "$dict" srcRes   && srcRes=$REPLY
+	dict_getValue "$dict" srcFps   && srcFps=$REPLY
+	dict_getValue "$dict" srcNumFr && srcNumFr=$REPLY
+	dict_getValue "$dict" QP       && QP=$REPLY
+	dict_getValue "$dict" BR       && BR=$REPLY
+	dict_getValue "$dict" PRESET   && PRESET=$REPLY
+	dict_getValue "$dict" TH       && TH=$REPLY
+	dict_getValue "$dict" SRC      && SRC=$REPLY
+	dict_getValue "$dict" encCmdHash && HASH=$REPLY
 
 	local str=
 	printf 	-v str    "%6s %6.0f %5.0f %5.0f"          "$extFPS" "$intFPS" "$cpu" "$kbps"
@@ -366,9 +373,10 @@ decode()
 	local frameLog="$outputDir/frame.log"
 	local summaryLog="$outputDir/summary.log"
 
-	local srcRes=$(detect_resolution_string "$src")
-	local srcFps=$(detect_framerate_string "$src")
-	local srcNumFr=$(detect_frame_num "$src" "$srcRes")
+	local srcRes= srcFps= srcNumFr=
+	detect_resolution_string "$src" && srcRes=$REPLY
+	detect_framerate_string "$src" && srcFps=$REPLY
+	detect_frame_num "$src" "$srcRes" && srcNumFr=$REPLY
 
 	local sizeInBytes=$(stat -c %s "$dst") kbps=
 	kbps=$(awk "BEGIN { print 8 * $sizeInBytes / ($srcNumFr/$srcFps) / 1000 }")
@@ -571,49 +579,60 @@ codec_default_preset()
 codec_exe()
 {
 	local codecId=$1; shift
-	local encoderExe=$(exe_${codecId})
+	local encoderExe
+	exe_${codecId} && encoderExe=$REPLY
 	[ -f "$encoderExe" ] || error_exit "encoder does not exist '$encoderExe'"
 	REPLY=$encoderExe
 }
 codec_hash()
 {
-	local codecId=$1 encoderExe= hash=
-	codec_exe $codecId && encoderExe=$REPLY
-	eval "hash=\${${codecId}_hash:-}"
-	if [ -z "$hash" ]; then
-		hash=$(md5sum ${encoderExe//\\//} | cut -d' ' -f 1 | base64)
+	local codecId=$1 hash=
+
+	eval "local cachedVal=\${CACHE_hash_${codecId}:-}"
+	if [ -n "$cachedVal" ]; then
+		hash=$cachedVal
+	else
+		local encoderExe
+		codec_exe $codecId && encoderExe=$REPLY
+		hash=$(md5sum ${encoderExe//\\//})
+		hash=${hash% *}
 		hash=${codecId}_${hash::8}
-		eval "${codecId}_hash=$hash"
+		eval "CACHE_hash_${codecId}=$hash"
 	fi
 	REPLY=$hash
 }
 codec_cmdArgs()
 {
 	local codecId=$1; shift
-	REPLY=$(cmd_${codecId} "$@")
+	cmd_${codecId} "$@"
+	REPLY=${REPLY# }
+	REPLY=${REPLY% }
 }
 codec_cmdHash()
 {
 	local src=$1; shift
-	local args=$*; shift
-	REPLY=$(echo "$(basename "$src") $args" | md5sum | base64)
+	local args=$*; shift ; args=${args// /}   # remove all whitespaces
+	local SRC=${src//\\/}; SRC=${SRC##*[/\\]} # basename only
+	local hash=$(echo "$SRC $args" | md5sum)
+	hash=${hash% *}
+	REPLY=$hash
 }
 codec_cmdSrc()
 {
 	local codecId=$1; shift
 	local src=$1; shift
-	REPLY=$(src_${codecId} "$src")
+	src_${codecId} "$src"
 }
 codec_cmdDst()
 {
 	local codecId=$1; shift
 	local dst=$1; shift
-	REPLY=$(dst_${codecId} "$dst")
+	dst_${codecId} "$dst"
 }
 
-exe_x265() { echo "$x265EncoderExe"; }
-src_x265() { echo "--input $1"; }
-dst_x265() { echo "--output $1"; }
+exe_x265() { REPLY=$x265EncoderExe; }
+src_x265() { REPLY="--input $1"; }
+dst_x265() { REPLY="--output $1"; }
 cmd_x265()
 {
 	local args= threads=0
@@ -641,12 +660,12 @@ cmd_x265()
 	args="$args --psnr"
 	args="$args --ssim"
 
-	echo "$args"
+	REPLY=$args
 }
 
-exe_ashevc() { echo "$ashevcEncoderExe"; }
-src_ashevc() { echo "--input $1"; }
-dst_ashevc() { echo "--output $1"; }
+exe_ashevc() { REPLY=$ashevcEncoderExe; }
+src_ashevc() { REPLY="--input $1"; }
+dst_ashevc() { REPLY="--output $1"; }
 cmd_ashevc()
 {
 	local args= threads=1 res= preset=5
@@ -678,15 +697,13 @@ cmd_ashevc()
 	args="$args --keyint 999999"	# Only first picture is intra.
 	args="$args --psnr 1"
 	args="$args --ssim 1"
-	args=${args# *}
-	args=${args// / }
 
-	echo "$args"
+	REPLY=$args
 }
 
-exe_kvazaar() { echo "$kvazaarEncoderExe"; }
-src_kvazaar() { echo "--input $1"; }
-dst_kvazaar() { echo "--output $1"; }
+exe_kvazaar() { REPLY=$kvazaarEncoderExe; }
+src_kvazaar() { REPLY="--input $1"; }
+dst_kvazaar() { REPLY="--output $1"; }
 cmd_kvazaar()
 {
 	local args= threads=0
@@ -711,12 +728,12 @@ cmd_kvazaar()
 	args="$args --owf 0" 			# Frame-level parallelism. Process N+1 frames at a time.
 	args="$args --period 0"         # Only first picture is intra.
 
-	echo "${args# *}"
+	REPLY=$args
 }
 
-exe_kingsoft() { echo "$kingsoftEncoderExe"; }
-src_kingsoft() { echo "-i $1"; }
-dst_kingsoft() { echo "-b $1"; }
+exe_kingsoft() { REPLY=$kingsoftEncoderExe; }
+src_kingsoft() { REPLY="-i $1"; }
+dst_kingsoft() { REPLY="-b $1"; }
 cmd_kingsoft()
 {
 	local args= threads=1 res=
@@ -746,7 +763,7 @@ cmd_kingsoft()
 	args="$args -iper -1"         	# Only first picture is intra.
 #	args="$args -fpp 1" 			# TODO: enable frame level parallel
 
-	echo "$args"
+	REPLY=$args
 }
 
 cmd_intel()
@@ -780,27 +797,22 @@ cmd_intel()
 	args="$args -x 1"         		# Number of reference frames
 #	args="$args -num_active_P 1"	# Number of maximum allowed references for P frames
 
-	echo "h265 $args"
+	REPLY="h265 $args"
 }
 
-exe_intel_sw() { echo "$intelEncoderExe"; }
-src_intel_sw() { echo "-i $1"; }
-dst_intel_sw() { echo "-o $1"; }
-cmd_intel_sw()
-{
-	echo "$(cmd_intel "$@") -sw"
-}
-exe_intel_hw() { echo "$intelEncoderExe"; }
-src_intel_hw() { echo "-i $1"; }
-dst_intel_hw() { echo "-o $1"; }
-cmd_intel_hw() 
-{
-	echo "$(cmd_intel "$@") -hw"
-}
+exe_intel_sw() { REPLY=$intelEncoderExe; }
+src_intel_sw() { REPLY="-i $1"; }
+dst_intel_sw() { REPLY="-o $1"; }
+cmd_intel_sw() { cmd_intel "$@" && REPLY="$REPLY -sw"; }
 
-exe_h265demo() { echo "$h265EncDemoExe"; }
-src_h265demo() { echo "-i $1"; }
-dst_h265demo() { echo "-b $1"; }
+exe_intel_hw() { REPLY=$intelEncoderExe; }
+src_intel_hw() { REPLY="-i $1"; }
+dst_intel_hw() { REPLY="-o $1"; }
+cmd_intel_hw() { cmd_intel "$@" && REPLY="$REPLY -hw"; }
+
+exe_h265demo() { REPLY=$h265EncDemoExe; }
+src_h265demo() { REPLY="-i $1"; }
+dst_h265demo() { REPLY="-b $1"; }
 cmd_h265demo()
 {
 	local args= threads=1 res= fps= preset=6
@@ -879,12 +891,12 @@ cmd_h265demo()
 		mkdir -p "$(dirname "$pathCfg")"
 		echo "$cfg" > "$pathCfg"
 	fi
-	echo "-c $pathCfg $args"
+	REPLY="-c $pathCfg $args"
 }
 
-exe_h264demo() { echo "$HW264_Encoder_DemoExe"; }
-src_h264demo() { echo "Source = $1"; }
-dst_h264demo() { echo "Destination = $1"; }
+exe_h264demo() { REPLY=$HW264_Encoder_DemoExe; }
+src_h264demo() { REPLY="Source = $1"; }
+dst_h264demo() { REPLY="Destination = $1"; }
 cmd_h264demo()
 {
 	local args= threads=1 res= bitrateKbps=2000
@@ -930,8 +942,8 @@ cmd_h264demo()
 	args="$args bReconstuctFrame = 0"
 	args="$args Framecount = 999999"
 
-#	echo "$HW264_Encoder_DemoExe --test $args"
-	echo "$HW264_Encoder_DemoExe $args"
+#	REPLY="--test $args"
+	REPLY=$args
 }
 
 entrypoint "$@"
