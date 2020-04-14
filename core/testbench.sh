@@ -1,6 +1,9 @@
 set -eu -o pipefail
 
-readonly dirScript="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
+. "$dirScript/utility_functions.sh"
+
+readonly dirScript=$(cygpath -m "$dirScript")
 
 PRMS="28 34 39 44"
 REPORT=report.log
@@ -68,7 +71,7 @@ entrypoint()
 			-p|--prm*) 		cmd_prms=$2;;
 			   --pre*) 		cmd_presets=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
-			*) echo "error: unrecognized option '$1'" >&2 && return 1
+			*) error_exit "unrecognized option '$1'"
 		esac
 		shift $nargs
 	done
@@ -97,8 +100,8 @@ entrypoint()
 		echo "$timestamp" >> $REPORT
 		echo "$timestamp" >> $REPORT_KW
 
-		print_legend
-		print_header
+		output_legend
+		output_header
 	fi
 
 	local prm= src= codecId=
@@ -114,13 +117,13 @@ entrypoint()
 		fi
 
 		local srcRes=$(detect_resolution_string "$src")
-		[ -z "$srcRes" ] && echo "error: can't detect resolution for $src" >&2 && return 1
+		[ -z "$srcRes" ] && error_exit "can't detect resolution for $src"
 		local srcFps=$(detect_framerate_string "$src")
 		local width=${srcRes%%x*}
 		local height=${srcRes##*x}
 
 		local srcNumFr=$(detect_frame_num "$src" "$srcRes")
-		[ -z "$srcNumFr" ] && echo "error: can't detect number of frames for $src" >&2 && return 1
+		[ -z "$srcNumFr" ] && error_exit "can't detect number of frames for $src"
 
 		local ext=h265; [ $codecId == h264demo ] && ext=h264
 
@@ -144,7 +147,7 @@ entrypoint()
 		local cmd=
 		cmd=$(cmd_${codecId} "$@")
 		local info="codecId:$codecId srcRes:${width}x${height} srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset TH:$THREADS SRC:$(basename $src)"
-		print_info "$info"
+		output_info "$info"
 
 		mkdir -p "$(dirname "$dst")"
 		local stdoutLog=${dst%.*}.log
@@ -158,9 +161,9 @@ entrypoint()
 		local consumedSec=$(date +%s%3N) # seconds*1000
 
 		if ! { echo "yes" | $cmd ;} 1>>$stdoutLog 2>&1 ; then
-			printf "\nEncoding error, logs:\n"
-			cat $stdoutLog
-			return 1
+			[ -t 2 ] && echo "" # newline if stdout==tty
+			cat "$stdoutLog" >&2
+			error_exit "encoding error, see logs above"
 		fi
 		consumedSec=$(( $(date +%s%3N) - consumedSec ))
 
@@ -179,7 +182,7 @@ entrypoint()
 		rm -f "$recon"
 
 		local TAG="$(basename $src).QP=$qp.BR=$bitrate.preset=$preset"
-		print_report "extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg kbps:$kbps $framestat $info TAG:$TAG"
+		output_report "extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg kbps:$kbps $framestat $info TAG:$TAG"
 	done
 	done
 	done
@@ -222,15 +225,7 @@ stop_cpu_monitor()
 	echo "$cpuAvg"
 }
 
-dict_getValue()
-{
-	local dict=$1 key=$2; val=${dict#*$key:};	
-	val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
-	val=${val%%[ $'\t']*} # Cut everything after left most whitespace
-	echo "$val"
-}
-
-print_legend()
+output_legend()
 {
 	local str=$(cat <<-'EOT'
 		extFPS     - Estimated FPS: numFrames/encoding_time_sec		
@@ -254,7 +249,7 @@ print_legend()
 	echo "$str" > /dev/tty
 }
 
-print_header()
+output_header()
 {
 	local str=
 	printf 	-v str    "%6s %6s %5s %5s"                 extFPS intFPS cpu% kbps
@@ -262,12 +257,12 @@ print_header()
 	printf 	-v str "%s %6s %6s %6s %6s"          "$str" gPSNR psnr-I psnr-P gSSIM
 	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %2s %s" "$str" codecId resolution '#frm' QP BR PRESET TH SRC
 
-	echo_console "$str" "\n"
+	print_console "$str\n"
 
 	echo "$str" >> "$REPORT"
 }
 
-print_info()
+output_info()
 {
 	local dict="$*"
 	local codecId=$(dict_getValue "$dict" codecId)
@@ -286,10 +281,10 @@ print_info()
 	printf 	-v str "%s %6s %6s %6s %6s"          "$str" "" "" "" ""
 	printf 	-v str "%s %-8s %11s %5s %2s %6s %9s %2s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$TH" "$SRC"
 
-	echo_console "$str" "\r"
+	print_console "$str\r"
 }
 
-print_report()
+output_report()
 {
 	local dict="$*"
 
@@ -323,25 +318,8 @@ print_report()
 	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f"  "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
 	printf 	-v str "%s %-8s %11s %5d %2s %6s %9s %2s %s" "$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR" "$PRESET" "$TH" "$SRC"
 
-	echo_console "$str" "\n"
+	print_console "$str\n"
 	echo "$str" >> $REPORT
-}
-
-echo_console() # str eol -> console
-{
-	# sugar
-	if [ -t 1 ]; then
-		if [ -z "${COLUMNS:-}" ]; then
-			case $OS in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2) && export COLUMNS; esac
-		fi
-	fi
-
-	local str="$1"; shift
-	local eol=""
-	[ "$#" -gt 0 ] && eol=$1
-
-	[ -n "${COLUMNS:-}" ] && [ "${#str}" -gt "${COLUMNS:-}" ] && str="${str:0:$((COLUMNS - 4))}..."
-	printf "%s$eol" "$str" > /dev/tty
 }
 
 parse_framestat()
@@ -515,7 +493,7 @@ parse_stdoutLog()
 			fps=$(cat "$log" | grep 'Tests completed' | tr -s ' ' | cut -d' ' -f 1)
 			snr=$(cat "$log" | grep 'Tests completed' | tr -s ' ' | cut -d' ' -f 5)
 		;;
-		*) echo "unknown encoder($LINENO): $codecId" >&2 && return 1 ;;
+		*) error_exit "unknown encoder: $codecId";;
 	esac
 	echo "$fps"
 }
@@ -533,7 +511,7 @@ codec_default_preset()
 		intel_*)	preset=faster;;
 		h265demo)	preset=5;;
 		h264demo)	preset=-;;
-		*) echo "unknown encoder($LINENO): $codecId" >&2 && exit 1;;
+		*) error_exit "unknown encoder: $codecId";;
 	esac
 
 	echo "$preset"
@@ -552,7 +530,7 @@ cmd_x265()
 			   --qp)     	args="$args --qp $2";;
 			   --bitrate)   args="$args --bitrate $2";;
 			   --threads)   threads=$2;;
-			*) echo "error: unrecognized option '$1'" 1>&2 && return 1;
+			*) error_exit "unrecognized option '$1'"
 		esac
 		shift 2
 	done
@@ -582,7 +560,7 @@ cmd_ashevc()
 			   --qp)     	args="$args --qp $2      --rc 12";; # rc=12: CQP
 			   --bitrate)   args="$args --bitrate $2 --rc 8";;  # rc=8: ABR
 			   --threads)   threads=$2;;
-			*) echo "error: unrecognized option '$1'" 1>&2 && return 1;
+			*) error_exit "unrecognized option '$1'"
 		esac
 		shift 2
 	done
@@ -617,7 +595,7 @@ cmd_kvazaar()
 			   --qp)     	args="$args --qp $2";;
 			   --bitrate)   args="$args --bitrate $(( 1000 * $2 ))";;
 			   --threads)   threads=$2;;
-			*) echo "error: unrecognized option '$1'" 1>&2 && return 1;
+			*) error_exit "unrecognized option '$1'"
 		esac
 		shift 2
 	done
@@ -644,7 +622,7 @@ cmd_kingsoft()
 			   --qp)     	args="$args -qp $2 -qpmin $2 -qpmax $2";; # valid when RCType != 0, (maybe -fixqp ?)
 			   --bitrate)   args="$args -br $2";;
 			   --threads)   threads=$2;;
-			*) echo "error: unrecognized option '$1'" 1>&2 && return 1;
+			*) error_exit "unrecognized option '$1'"
 		esac
 		shift 2
 	done
@@ -677,7 +655,7 @@ cmd_intel()
 			   --qp)     	args="$args -cqp -qpi $2 -qpp $2";;
 			   --bitrate)   args="$args -b $2";;
 			   --threads)   threads=$2;;
-			*) echo "error: unrecognized option '$1'" 1>&2 && return 1;
+			*) error_exit "unrecognized option '$1'"
 		esac
 		shift 2
 	done
@@ -719,7 +697,7 @@ cmd_h265demo()
 			   --qp)     	args="$args -rc 2 -qp $2";;
 			   --bitrate)   args="$args -rc 0 -br $2";;
 			   --threads)   threads=$2;;
-			*) echo "error: unrecognized option '$1'" 1>&2 && return 1;
+			*) error_exit "unrecognized option '$1'"
 		esac
 		shift 2
 	done
@@ -797,7 +775,7 @@ cmd_h264demo()
 							args="$args iMaxQP = $2";;
 			   --bitrate)   bitrateKbps=$2;;
 			   --threads)   threads=$2;;
-			*) echo "error: unrecognized option '$1'" 1>&2 && return 1;
+			*) error_exit "unrecognized option '$1'"
 		esac
 		shift 2
 	done
@@ -829,113 +807,6 @@ cmd_h264demo()
 
 #	echo "$HW264_Encoder_DemoExe --test $args"
 	echo "$HW264_Encoder_DemoExe $args"
-}
-
-detect_resolution_string()
-{	
-	local filename=$1; shift
-	local name=$(basename "$filename")
-	name=${name%%.*}
-	local res=
-
-	# Upper case
-	name=$(echo "$name" | tr a-z A-Z)
-
-	# try HxW pattern delimited by "." or "_"
-	for delim in _ .; do
-		local IFS=$delim
-		for i in $name; do
-			if [[ "$i" =~ ^[1-9][0-9]{1,3}X[1-9][0-9]{1,3}$ ]]; then
-				res=$i && break
-			fi
-		done
-		[ -n "$res" ] && break
-	done
-	[ -n "$res" ] && { echo "$res" | tr X x; } && return
-
-	# try abbreviations CIF, QCIF, ... delimited by "." or "_"
-	for delim in _ .; do
-		local IFS=$delim
-		for i in $name; do
-			case $i in # https://en.wikipedia.org/wiki/Common_Intermediate_Format
-				 NTSC)	res=352x240;;   # 30 fps (11:9)  <=> SIF
-				SQSIF)	res=128x96;;
-				 QSIF)	res=176x120;;
-			  	  SIF) 	res=352x240;;
-				 2SIF) 	res=704x240;;
-				 4SIF) 	res=704x480;;
-				16SIF)	res=1408x960;;
-
-				  PAL)	res=352x288;;   # 25 fps         <=> CIF
-				SQCIF)	res=128x96;;
-				 QCIF)	res=176x144;;
-			 	  CIF) 	res=352x288;;
-				 2CIF) 	res=704x288;;   # Half D1
-				 4CIF) 	res=704x576;;   # D1
-				16CIF)	res=1408x1152;;
-
-				720P)   res=1280x720;;
-			   1080P)   res=1920x1080;;
-			   1440P) 	res=2560x1440;;
-			   2160P) 	res=3840x2160;;
-			   4320P) 	res=7680x4320;;
-
-			      2K)   res=1920x1080;; # or 2560x1440
-			      4K) 	res=3840x2160;;
-			      8K) 	res=7680x4320;;
-			esac
-			[ -n "$res" ] && break
-		done
-		[ -n "$res" ] && break
-	done
-	[ -n "$res" ] && echo "$res" && return
-
-	echo "error: can't detect resolution $filename" >&2
-	return 1
-}
-
-detect_framerate_string()
-{	
-	local filename=$1; shift
-	local name=$(basename "$filename")
-	name=${name%%.*}
-	local framerate=
-
-	# Upper case
-	name=$(echo "$name" | tr a-z A-Z)
-
-	# try XXX pattern delimited by "." or "_"
-	for delim in _ .; do
-		local IFS=$delim
-		for i in $name; do
-			if [[ "$i" =~ ^[1-9][0-9]{0,2}(FPS)?$ ]]; then
-				framerate=${i%FPS} && break
-			fi
-		done
-		[ -n "$framerate" ] && break
-	done
-	[ -z "$framerate" ] && framerate=30
-	echo "$framerate"
-}
-
-detect_frame_num()
-{
-	local filename=$1; shift
-	local res=${1:-};
-	if [ -z "$res" ]; then
-		res=$(detect_resolution_string "$filename")
-	fi
-	[ -z "$res" ] && return
-
-	local numBytes=$(stat -c %s "$filename")
-	[ -z "$numBytes" ] && return 1
-
-	local width=${res%%x*}
-	local height=${res##*x}
-	local numFrames=$(( 2 * numBytes / width / height / 3 )) 
-	local numBytes2=$(( 3 * numFrames * width * height / 2 ))
-	[ $numBytes != $numBytes2 ] && echo "error: can't detect frames number $filename" >&2 && return 1
-	echo $numFrames
 }
 
 entrypoint "$@"

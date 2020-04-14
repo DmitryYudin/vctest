@@ -4,8 +4,10 @@ set -eu -o pipefail
 # TODO: Evaluation bdrate for psnr-I.P looks suspicious since we use total bitrate, not a budget consumed by I/P
 # TODO: Add avgPSNR-Y/U/V to output statistics
 #
+dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
+. "$dirScript/utility_functions.sh"
 
-readonly dirScript="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+readonly dirScript=$(cygpath -m "$dirScript")
 readonly bdratePy=$dirScript/bdrate/bdrate.py
 readonly KEY_DELIM="\(^\| \)" # line start or space
 
@@ -119,18 +121,5 @@ entrypoint()
 	done
 }
 
-error_exit()
-{
-	printf "error: $*" >&2 
-	exit 1
-}
-
-dict_getValue()
-{
-	local dict=$1 key=$2; val=${dict#*$key:};	
-	val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
-	val=${val%%[ $'\t']*} # Cut everything after left most whitespace
-	echo "$val"
-}
 
 entrypoint "$@"
