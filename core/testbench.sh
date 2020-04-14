@@ -80,6 +80,9 @@ entrypoint()
 
 	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
 
+	# Remove non-existing and set abs-path
+	vectors_verify $VECTORS && VECTORS=$REPLY
+
 	# Remove codecs we can't run
 	codec_verify $CODECS && CODECS=$REPLY
 
@@ -207,6 +210,30 @@ entrypoint()
 	progress_end
 
 	print_console "$REPORT\n"
+}
+
+vectors_verify()
+{
+	local VECTORS="$*" vec= removeList=
+
+	for vec in $VECTORS; do
+		if ! [ -f "$vec" ]; then
+			echo "warning: can't find vector. Remove '$vec' from a list."
+			removeList="$removeList $vec"
+			continue
+		fi
+	done
+
+	for vec in $removeList; do
+		VECTORS=$(echo "$VECTORS" | sed "s/$vec//")
+	done
+
+	local VECTORS_ABS=
+	for vec in $VECTORS; do
+		VECTORS_ABS="$VECTORS_ABS $(cygpath -m "$(realpath "$vec")")"
+	done
+
+	REPLY=$VECTORS_ABS
 }
 
 PERF_ID=

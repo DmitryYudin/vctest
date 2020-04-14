@@ -41,10 +41,18 @@ codec_default_preset()
 }
 codec_exe()
 {
-	local codecId=$1; shift
-	local encoderExe
-	exe_${codecId} && encoderExe=$REPLY
-	[ -f "$encoderExe" ] || error_exit "encoder does not exist '$encoderExe'"
+	local codecId=$1 encoderExe=
+
+	eval "local cachedVal=\${CACHE_path_${codecId}:-}"
+	if [ -n "$cachedVal" ]; then
+		encoderExe=$cachedVal
+	else
+		exe_${codecId} && encoderExe=$REPLY
+		[ -f "$encoderExe" ] || error_exit "encoder does not exist '$encoderExe'"
+		encoderExe=$(realpath "$encoderExe")
+		eval "CACHE_path_${codecId}=$encoderExe"
+	fi
+
 	REPLY=$encoderExe
 }
 codec_hash()
