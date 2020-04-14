@@ -76,26 +76,21 @@ entrypoint()
 	[ -n "$cmd_threads" ] && THREADS=$cmd_threads
 	[ -n "$cmd_prms" ] && PRMS=$cmd_prms
 	[ -n "$cmd_presets" ] && PRESETS=$cmd_presets
+	PRESETS=${PRESETS:--}
 
 	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
 
 	# Remove codecs we can't run
 	codec_verify $CODECS && CODECS=$REPLY
 
-	readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-	if [ -z "$hide_banner" ]; then
-		echo "$timestamp" >> $REPORT
-		echo "$timestamp" >> $REPORT_KW
+	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS" "$PRESETS"
 
-		output_legend
-		output_header
-	fi
-
+	local encodeList= decodeList= parseList= reportList=
 	local prm= src= codecId=
 	for prm in $PRMS; do
 	for src in $VECTORS; do
 	for codecId in $CODECS; do
-	for preset in ${PRESETS:--}; do
+	for preset in $PRESETS; do
 		local qp=- bitrate=-
 		if [ $prm -lt 60 ]; then
 			qp=$prm
@@ -121,86 +116,97 @@ entrypoint()
 		codec_hash $codecId && encExeHash=$REPLY
 		codec_cmdArgs $codecId $args && encCmdArgs=$REPLY
 		codec_cmdHash "$src" $encCmdArgs && encCmdHash=$REPLY
-		local outputDir="$DIR_OUT/$encExeHash/$encCmdHash"
-		local SRC=${src//\\/}; SRC=${SRC##*[/\\]}
-		local dst="$outputDir/$SRC.$ext"
-		local stdoutLog="$outputDir/stdout.log"
-		local cpuLog="$outputDir/cpu.log"
-		local fpsLog="$outputDir/fps.log"
 
+		local outputDir="$DIR_OUT/$encExeHash/$encCmdHash"
+
+		# clean up target directory if we need to start from a scratch
+		if [ ! -f "$outputDir/encoded.ts" ]; then
+			rm -rf "$outputDir"
+			mkdir -p "$outputDir"
+		fi
+
+		local SRC=${src//\\/}; SRC=${SRC##*[/\\]}
+		local dst="$SRC.$ext"
+
+		# readonly kw-file will be used across all processing stages
 		local info="codecId:$codecId srcRes:$srcRes srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset"
-		info="$info TH:$THREADS SRC:$SRC encCmdHash:$encCmdHash"
-		output_info "$info"
+		info="$info TH:$THREADS SRC:$SRC encCmdHash:$encCmdHash src:$src dst:$dst"
+		echo "$info" > $outputDir/info.kw
+
+		progress_next "$outputDir"
 
 		if [ ! -f "$outputDir/encoded.ts" ]; then
-
-			rm -rf "$(dirname "$dst")/"
-			mkdir -p "$(dirname "$dst")"
-
 			local encCmdSrc= encCmdDst=
 			codec_cmdSrc $codecId "$src" && encCmdSrc=$REPLY
 			codec_cmdDst $codecId "$dst" && encCmdDst=$REPLY
-			{
-				echo "$codecId"
-				echo "$encCmdArgs"
-				echo "$encCmdSrc"
-				echo "$encCmdDst"
-			} > $stdoutLog
-			echo "$src" > $outputDir/src
-			echo "$dst" > $outputDir/dst
+
 			local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
+			echo "$cmd" > $outputDir/cmd
 
-			# Start CPU monitor
-			trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
-			start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
-
-			# Encode
-			local consumedSec=$(date +%s%3N) # seconds*1000
-			if ! { echo "yes" | $cmd; } 1>>$stdoutLog 2>&1 || [ ! -f "$dst" ]; then
-				echo "" # newline if stderr==tty
-				cat "$stdoutLog" >&2
-				error_exit "encoding error, see logs above"
-			fi
-			consumedSec=$(( $(date +%s%3N) - consumedSec ))
-
-			# Stop CPU monitor
-			stop_cpu_monitor
-			trap -- EXIT
-
-			local fps=0
-			[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
-			echo "$fps" > $fpsLog
-
-			date "+%Y.%m.%d-%H.%M.%S" > $outputDir/encoded.ts
+			encodeList="$encodeList $outputDir"
 		fi
-
 		if [ ! -f "$outputDir/decoded.ts" ]; then
-
-            decode "$outputDir"
-
-			date "+%Y.%m.%d-%H.%M.%S" > $outputDir/decoded.ts
+			decodeList="$decodeList $outputDir"
 		fi
-
-		if [ ! -f "$outputDir/report.ts" ]; then
-			local cpuAvg= extFPS= intFPS= framestat=
-			cpuAvg=$(parse_cpuLog "$cpuLog")
-			extFPS=$(cat "$fpsLog")
-			intFPS=$(parse_stdoutLog "$stdoutLog")
-			framestat=$(parse_framestat "$outputDir")
-
-			local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg $framestat $info"
-
-			echo "$dict" > $outputDir/report.kw
-
-			date "+%Y.%m.%d-%H.%M.%S" > $outputDir/report.ts
+		if [ ! -f "$outputDir/parsed.ts" ]; then
+			parseList="$parseList $outputDir"
 		fi
+		reportList="$reportList $outputDir"
+	done
+	done
+	done
+	done
+	progress_end
 
-		local dict=$(cat "$outputDir/report.kw")		
-		output_report "$dict"
+	progress_begin "[2/5] Encoding..." "$encodeList"
+	for outputDir in $encodeList; do
+
+		progress_next "$outputDir"
+
+		encode_single_file "$outputDir"
+
+		date "+%Y.%m.%d-%H.%M.%S" > $outputDir/encoded.ts
 	done
+	progress_end
+
+	progress_begin "[3/5] Decoding..." "$decodeList"
+	for outputDir in $decodeList; do
+
+		progress_next "$outputDir"
+
+        decode_single_file "$outputDir"
+
+		date "+%Y.%m.%d-%H.%M.%S" > $outputDir/decoded.ts
 	done
+	progress_end
+
+	progress_begin "[4/5] Parsing..." "$parseList"
+	for outputDir in $parseList; do
+
+		progress_next "$outputDir"
+
+		parse_single_file "$outputDir"
+
+		date "+%Y.%m.%d-%H.%M.%S" > $outputDir/parsed.ts
 	done
+	progress_end
+
+	progress_begin "[5/5] Reporting..."	"$reportList"
+	if [ -z "$hide_banner" ]; then
+		readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
+		echo "$timestamp" >> $REPORT
+		echo "$timestamp" >> $REPORT_KW
+
+		output_legend
+		output_header
+	fi
+	for outputDir in $reportList; do
+		progress_next "$outputDir"
+		report_single_file "$outputDir"
 	done
+	progress_end
+
+	print_console "$REPORT\n"
 }
 
 PERF_ID=
@@ -232,6 +238,92 @@ stop_cpu_monitor()
 	PERF_ID=
 }
 
+PROGRESS_SEC=
+PROGRESS_HDR=
+PROGRESS_INFO=
+PROGRESS_CNT_TOT=0
+PROGRESS_CNT=0
+progress_begin()
+{
+	local name=$1; shift
+	local str=
+	PROGRESS_SEC=$SECONDS
+	PROGRESS_HDR=
+	PROGRESS_INFO=
+	PROGRESS_CNT_TOT=1
+	PROGRESS_CNT=0
+	for str; do
+		list_size "$1" && PROGRESS_CNT_TOT=$(( PROGRESS_CNT_TOT * REPLY))
+		shift
+	done
+	print_console "$name\n"
+
+	if [ $PROGRESS_CNT_TOT == 0 ]; then
+		print_console "No tasks to execute\n\n"
+	else
+		printf 	-v str "%8s %4s %-8s %11s %5s %2s %6s" "Time" $PROGRESS_CNT_TOT codecId resolution '#frm' QP BR 
+		printf 	-v str "%s %9s %2s %-16s %s" "$str" PRESET TH HASH SRC
+		PROGRESS_HDR=$str
+	fi
+}
+progress_next()
+{
+	local outputDir=$1 info=
+	info=$(cat $outputDir/info.kw)
+
+	if [ -n "$PROGRESS_HDR" ]; then
+		print_console "$PROGRESS_HDR\n"
+		PROGRESS_HDR=
+	fi
+
+	PROGRESS_CNT=$(( PROGRESS_CNT + 1 ))
+
+	local codecId= srcRes= srcFps= srcNumFr= QP= BR= PRESET= TH= SRC= HASH=
+	dict_getValue "$info" codecId  && codecId=$REPLY
+	dict_getValue "$info" srcRes   && srcRes=$REPLY
+	dict_getValue "$info" srcFps   && srcFps=$REPLY
+	dict_getValue "$info" srcNumFr && srcNumFr=$REPLY
+	dict_getValue "$info" QP       && QP=$REPLY
+	dict_getValue "$info" BR       && BR=$REPLY
+	dict_getValue "$info" PRESET   && PRESET=$REPLY
+	dict_getValue "$info" TH       && TH=$REPLY
+	dict_getValue "$info" SRC      && SRC=$REPLY
+	dict_getValue "$info" HASH     && HASH=$REPLY
+	local str=
+	printf 	-v str "%4s %-8s %11s %5s %2s %6s" 	"$PROGRESS_CNT" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
+	printf 	-v str "%s %9s %2s %-16s %s"  		"$str" "$PRESET" "$TH" "${HASH::16}" "$SRC"
+	PROGRESS_INFO=$str # backup
+
+	local duration=$(( SECONDS - PROGRESS_SEC ))
+	duration=$(date +%H:%M:%S -u -d @${duration})
+
+	print_console "$duration $PROGRESS_INFO\r"
+}
+progress_end()
+{
+	[ $PROGRESS_CNT == 0 ] && return
+
+	local duration=$(( SECONDS - PROGRESS_SEC ))
+	duration=$(date +%H:%M:%S -u -d @${duration})
+
+	print_console "$duration $PROGRESS_INFO\n"
+
+	PROGRESS_CNT_TOT=0
+}
+
+output_header()
+{
+	local str=
+	printf 	-v str    "%6s %6s %5s %5s"                extFPS intFPS cpu% kbps
+	printf 	-v str "%s %3s %7s %6s %4s"         "$str" '#I' avg-I avg-P peak 
+	printf 	-v str "%s %6s %6s %6s %6s"         "$str" gPSNR psnr-I psnr-P gSSIM
+	printf 	-v str "%s %-8s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
+	printf 	-v str "%s %9s %2s %-16s %s" 		"$str" PRESET TH HASH SRC
+
+#	print_console "$str\n"
+
+	echo "$str" >> "$REPORT"
+}
 output_legend()
 {
 	local str=$(cat <<-'EOT'
@@ -253,49 +345,8 @@ output_legend()
 	EOT
 	)
 
-	echo "$str" > /dev/tty
+#	echo "$str" > /dev/tty
 }
-
-output_header()
-{
-	local str=
-	printf 	-v str    "%6s %6s %5s %5s"                extFPS intFPS cpu% kbps
-	printf 	-v str "%s %3s %7s %6s %4s"         "$str" '#I' avg-I avg-P peak 
-	printf 	-v str "%s %6s %6s %6s %6s"         "$str" gPSNR psnr-I psnr-P gSSIM
-	printf 	-v str "%s %-8s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
-	printf 	-v str "%s %9s %2s %-16s %s" 		"$str" PRESET TH HASH SRC
-
-	print_console "$str\n"
-
-	echo "$str" >> "$REPORT"
-}
-
-output_info()
-{
-	local dict="$*"
-	local codecId= srcRes= srcFps= srcNumFr= QP= BR= PRESET= TH= SRC= HASH=
-
-	dict_getValue "$dict" codecId  && codecId=$REPLY
-	dict_getValue "$dict" srcRes   && srcRes=$REPLY
-	dict_getValue "$dict" srcFps   && srcFps=$REPLY
-	dict_getValue "$dict" srcNumFr && srcNumFr=$REPLY
-	dict_getValue "$dict" QP       && QP=$REPLY
-	dict_getValue "$dict" BR       && BR=$REPLY
-	dict_getValue "$dict" PRESET   && PRESET=$REPLY
-	dict_getValue "$dict" TH       && TH=$REPLY
-	dict_getValue "$dict" SRC      && SRC=$REPLY
-	dict_getValue "$dict" encCmdHash && HASH=$REPLY
-
-	local str=
-	printf 	-v str    "%6s %6s %5s %5s"                "" "" "" ""
-	printf 	-v str "%s %3s %7s %6s %4s"         "$str" "" "" "" ""
-	printf 	-v str "%s %6s %6s %6s %6s"         "$str" "" "" "" ""
-	printf 	-v str "%s %-8s %11s %5s %2s %6s" 	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
-	printf 	-v str "%s %9s %2s %-16s %s"  		"$str" "$PRESET" "$TH" "${HASH::16}" "$SRC"
-
-	print_console "$str\r"
-}
-
 output_report()
 {
 	local dict="$*"
@@ -335,17 +386,70 @@ output_report()
 	printf 	-v str "%s %-8s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
 	printf 	-v str "%s %9s %2s %-16s %s" 		"$str" "$PRESET" "$TH" "${HASH::16}" "$SRC"
 
-	print_console "$str\n"
+#	print_console "$str\n"
 	echo "$str" >> $REPORT
 }
 
-decode()
+report_single_file()
 {
 	local outputDir=$1; shift
 
-	local src= dst=
-	src=$(cat "$outputDir/src")
-	dst=$(cat "$outputDir/dst")
+	local info= report=
+	info=$(cat "$outputDir/info.kw")
+	report=$(cat "$outputDir/report.kw")		
+
+	output_report "$info $report"
+}
+
+encode_single_file()
+{
+	local outputDir=$1; shift
+
+	local info= codecId= src= dst= srcNumFr=
+	info=$(cat $outputDir/info.kw)
+	dict_getValue "$info" codecId && codecId=$REPLY
+	dict_getValue "$info" srcNumFr && srcNumFr=$REPLY
+	dict_getValue "$info" src && src=$REPLY
+	dict_getValue "$info" dst && dst=$REPLY
+
+	local cmd=
+	cmd=$(cat $outputDir/cmd)
+
+	local stdoutLog="$outputDir/stdout.log"
+	local cpuLog="$outputDir/cpu.log"
+	local fpsLog="$outputDir/fps.log"
+
+	# Start CPU monitor
+	trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
+	start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
+
+	# Encode
+	local consumedSec=$(date +%s%3N) # seconds*1000
+	if ! { echo "yes" | $cmd; } 1>>$stdoutLog 2>&1 || [ ! -f "$dst" ]; then
+		echo "" # newline if stderr==tty
+		cat "$stdoutLog" >&2
+		error_exit "encoding error, see logs above"
+	fi
+	consumedSec=$(( $(date +%s%3N) - consumedSec ))
+
+	# Stop CPU monitor
+	stop_cpu_monitor
+	trap -- EXIT
+
+	local fps=0
+	[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
+	echo "$fps" > $fpsLog
+
+}
+
+decode_single_file()
+{
+	local outputDir=$1; shift
+
+	local info= src= dst=
+	info=$(cat $outputDir/info.kw)
+	dict_getValue "$info" src && src=$REPLY
+	dict_getValue "$info" dst && dst=$REPLY
 
 	local recon="$outputDir/$(basename "$dst").yuv"
 	local kbpsLog="$outputDir/kbps.log"
@@ -356,17 +460,18 @@ decode()
 	local summaryLog="$outputDir/summary.log"
 
 	local srcRes= srcFps= srcNumFr=
-	detect_resolution_string "$src" && srcRes=$REPLY
-	detect_framerate_string "$src" && srcFps=$REPLY
-	detect_frame_num "$src" "$srcRes" && srcNumFr=$REPLY
+	dict_getValue "$info" srcRes && srcRes=$REPLY
+	dict_getValue "$info" srcFps && srcFps=$REPLY
+	dict_getValue "$info" srcNumFr && srcNumFr=$REPLY
 
-	local sizeInBytes=$(stat -c %s "$dst") kbps=
+	$ffmpegExe -y -loglevel error -i "$dst" "$recon"
+	$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $infoLog
+
+	local sizeInBytes= kbps=
+	sizeInBytes=$(stat -c %s "$dst")
 	kbps=$(awk "BEGIN { print 8 * $sizeInBytes / ($srcNumFr/$srcFps) / 1000 }")
 	echo "$kbps" > $kbpsLog
 
-	$ffmpegExe -y -loglevel error -i "$dst" "$recon"        
-	$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $infoLog
-    			
 	local ssimTmp=$(basename $ssimLog) # can't pass 'C:/...' to ffmpeg filter args, use temporary file
 	{   # ignore output
 		$ffmpegExe -hide_banner -s $srcRes -i "$src" -s $srcRes -i "$recon" -lavfi "ssim=stats_file=$ssimTmp" -f null - 2>&1 \
@@ -411,11 +516,34 @@ decode()
 	paste "$frameLog" "$psnrLog" "$ssimLog" > $summaryLog
 }
 
-parse_framestat()
+parse_single_file()
 {
 	local outputDir=$1; shift
+
+	local info= codecId=
+	info=$(cat $outputDir/info.kw)
+	dict_getValue "$info" codecId && codecId=$REPLY
+
+	local stdoutLog="$outputDir/stdout.log"
 	local kbpsLog="$outputDir/kbps.log"
+	local cpuLog="$outputDir/cpu.log"
+	local fpsLog="$outputDir/fps.log"
 	local summaryLog="$outputDir/summary.log"
+
+	local cpuAvg= extFPS= intFPS= framestat=
+	cpuAvg=$(parse_cpuLog "$cpuLog")
+	extFPS=$(cat "$fpsLog")
+	intFPS=$(parse_stdoutLog "$codecId" "$stdoutLog")
+	framestat=$(parse_framestat "$kbpsLog" "$summaryLog")
+
+	local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg $framestat"
+	echo "$dict" > $outputDir/report.kw
+}
+
+parse_framestat()
+{
+	local kbpsLog=$1; shift
+	local summaryLog=$1; shift
 
 	countTotal() { 
 		awk '{ cnt +=  1 } END { print cnt }'
@@ -508,9 +636,9 @@ FORMAT
 
 parse_stdoutLog()
 {
+	local codecId=$1; shift
 	local log=$1; shift
 	local fps= snr=
-	local codecId=$(cat "$log" | head -n 1);
 	case $codecId in
 		ashevc)
 			fps=$(cat "$log" | grep ' fps)' | tr -s ' ' | cut -d' ' -f 6); fps=${fps#(}

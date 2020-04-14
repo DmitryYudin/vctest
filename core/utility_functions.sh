@@ -24,6 +24,16 @@ dict_getValue()
 	REPLY=$val
 }
 
+list_size()
+{
+	local list="$*"
+	local cnt=0
+	for x in $list; do
+		cnt=$((cnt + 1))
+	done
+	REPLY=$cnt
+}
+
 # Works as print not 'echo', i.e. does not insert 'eol' character at the end of string.
 # Only takes care about '\n' and '\r' trailing charactrs (i.e. single line output only)
 # Does not pretend to cover all use cases (non-printable characters, etc)
