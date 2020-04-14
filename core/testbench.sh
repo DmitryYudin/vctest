@@ -166,9 +166,7 @@ entrypoint()
 
 		progress_next "$outputDir"
 
-		encode_single_file "$outputDir"
-
-		date "+%Y.%m.%d-%H.%M.%S" > $outputDir/encoded.ts
+		encode_single_file "$outputDir" > /dev/null
 	done
 	progress_end
 
@@ -177,9 +175,7 @@ entrypoint()
 
 		progress_next "$outputDir"
 
-        decode_single_file "$outputDir"
-
-		date "+%Y.%m.%d-%H.%M.%S" > $outputDir/decoded.ts
+        decode_single_file "$outputDir" > /dev/null
 	done
 	progress_end
 
@@ -188,9 +184,7 @@ entrypoint()
 
 		progress_next "$outputDir"
 
-		parse_single_file "$outputDir"
-
-		date "+%Y.%m.%d-%H.%M.%S" > $outputDir/parsed.ts
+		parse_single_file "$outputDir" > /dev/null
 	done
 	progress_end
 
@@ -431,20 +425,22 @@ report_single_file()
 encode_single_file()
 {
 	local outputDir=$1; shift
+	pushd "$outputDir"
+
 
 	local info= codecId= src= dst= srcNumFr=
-	info=$(cat $outputDir/info.kw)
+	info=$(cat info.kw)
 	dict_getValue "$info" codecId && codecId=$REPLY
 	dict_getValue "$info" srcNumFr && srcNumFr=$REPLY
 	dict_getValue "$info" src && src=$REPLY
 	dict_getValue "$info" dst && dst=$REPLY
 
 	local cmd=
-	cmd=$(cat $outputDir/cmd)
+	cmd=$(cat cmd)
 
-	local stdoutLog="$outputDir/stdout.log"
-	local cpuLog="$outputDir/cpu.log"
-	local fpsLog="$outputDir/fps.log"
+	local stdoutLog=stdout.log
+	local cpuLog=cpu.log
+	local fpsLog=fps.log
 
 	# Start CPU monitor
 	trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
@@ -467,24 +463,28 @@ encode_single_file()
 	[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
 	echo "$fps" > $fpsLog
 
+	date "+%Y.%m.%d-%H.%M.%S" > encoded.ts
+
+	popd
 }
 
 decode_single_file()
 {
 	local outputDir=$1; shift
+	pushd "$outputDir"
 
 	local info= src= dst=
-	info=$(cat $outputDir/info.kw)
+	info=$(cat info.kw)
 	dict_getValue "$info" src && src=$REPLY
 	dict_getValue "$info" dst && dst=$REPLY
 
-	local recon="$outputDir/$(basename "$dst").yuv"
-	local kbpsLog="$outputDir/kbps.log"
-	local infoLog="$outputDir/info.log"
-	local ssimLog="$outputDir/ssim.log"
-	local psnrLog="$outputDir/psnr.log"
-	local frameLog="$outputDir/frame.log"
-	local summaryLog="$outputDir/summary.log"
+	local recon=$(basename "$dst").yuv
+	local kbpsLog=kbps.log
+	local infoLog=info.log
+	local ssimLog=ssim.log
+	local psnrLog=psnr.log
+	local frameLog=frame.log
+	local summaryLog=summary.log
 
 	local srcRes= srcFps= srcNumFr=
 	dict_getValue "$info" srcRes && srcRes=$REPLY
@@ -499,20 +499,10 @@ decode_single_file()
 	kbps=$(awk "BEGIN { print 8 * $sizeInBytes / ($srcNumFr/$srcFps) / 1000 }")
 	echo "$kbps" > $kbpsLog
 
-	local ssimTmp=$(basename $ssimLog) # can't pass 'C:/...' to ffmpeg filter args, use temporary file
-	{   # ignore output
-		$ffmpegExe -hide_banner -s $srcRes -i "$src" -s $srcRes -i "$recon" -lavfi "ssim=stats_file=$ssimTmp" -f null - 2>&1 \
-			| grep '\[Parsed_' | sed 's/.*SSIM //'
-	} > /dev/null
-	cat "$ssimTmp" | tr -d $'\r' > "$ssimLog" && rm "$ssimTmp"
-
-	local psnrTmp=$(basename $psnrLog)
-	{   # ignore output
-		$ffmpegExe -hide_banner -s $srcRes -i "$src" -s $srcRes -i "$recon" -lavfi "psnr=stats_file=$psnrTmp" -f null - 2>&1 \
-			| grep '\[Parsed_' | sed 's/.*PSNR //'
-	} > /dev/null
-	cat "$psnrTmp" | tr -d $'\r' > "$psnrLog" && rm "$psnrTmp"
-
+	# ffmpeg does not accept filename in C:/... format as a filter option
+	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i "$src" -s $srcRes -i "$recon" -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
+		echo "$log" && return 1
+	fi
 	rm -f "$recon"
 
 	local numI=0 numP=0 sizeI=0 sizeP=0
@@ -540,22 +530,27 @@ decode_single_file()
 		done < $infoLog
 	} > $frameLog
 
-	paste "$frameLog" "$psnrLog" "$ssimLog" > $summaryLog
+	paste "$frameLog" "$psnrLog" "$ssimLog" | tr -d $'\r' > $summaryLog
+
+	date "+%Y.%m.%d-%H.%M.%S" > decoded.ts
+
+	popd
 }
 
 parse_single_file()
 {
 	local outputDir=$1; shift
+	pushd "$outputDir"
 
 	local info= codecId=
-	info=$(cat $outputDir/info.kw)
+	info=$(cat info.kw)
 	dict_getValue "$info" codecId && codecId=$REPLY
 
-	local stdoutLog="$outputDir/stdout.log"
-	local kbpsLog="$outputDir/kbps.log"
-	local cpuLog="$outputDir/cpu.log"
-	local fpsLog="$outputDir/fps.log"
-	local summaryLog="$outputDir/summary.log"
+	local stdoutLog=stdout.log
+	local kbpsLog=kbps.log
+	local cpuLog=cpu.log
+	local fpsLog=fps.log
+	local summaryLog=summary.log
 
 	local cpuAvg= extFPS= intFPS= framestat=
 	cpuAvg=$(parse_cpuLog "$cpuLog")
@@ -564,7 +559,11 @@ parse_single_file()
 	framestat=$(parse_framestat "$kbpsLog" "$summaryLog")
 
 	local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg $framestat"
-	echo "$dict" > $outputDir/report.kw
+	echo "$dict" > report.kw
+
+	date "+%Y.%m.%d-%H.%M.%S" > parsed.ts
+
+	popd
 }
 
 parse_framestat()
