@@ -133,12 +133,6 @@ entrypoint()
 
 		local outputDir="$DIR_OUT/$encExeHash/$encCmdHash"
 
-		# clean up target directory if we need to start from a scratch
-		if [ ! -f "$outputDir/encoded.ts" ]; then
-			rm -rf "$outputDir"
-			mkdir -p "$outputDir"
-		fi
-
 		local SRC=${src//\\/}; SRC=${SRC##*[/\\]}
 		local dst="$SRC.$ext"
 
@@ -149,7 +143,17 @@ entrypoint()
 
 		progress_next "$outputDir"
 
+		local encode=false
 		if [ ! -f "$outputDir/encoded.ts" ]; then
+			encode=true
+		elif [ $NCPU -eq 1 -a ! -f "$outputDir/cpu.log" ]; then
+			encode=true  # update CPU log
+		fi
+		if $encode; then
+			# clean up target directory if we need to start from a scratch
+			rm -rf "$outputDir"		# this alos force decoding and parsing
+			mkdir -p "$outputDir"
+
 			local encCmdSrc= encCmdDst=
 			codec_cmdSrc $codecId "$src" && encCmdSrc=$REPLY
 			codec_cmdDst $codecId "$dst" && encCmdDst=$REPLY
