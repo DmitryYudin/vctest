@@ -4,8 +4,6 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 . "$dirScript/utility_functions.sh"
 . "$dirScript/codec.sh"
 
-readonly dirScript=$(cygpath -m "$dirScript")
-
 PRMS="28 34 39 44"
 REPORT=report.log
 REPORT_KW=${REPORT%.*}.kw
@@ -258,7 +256,7 @@ vectors_verify()
 
 	local VECTORS_ABS=
 	for vec in $VECTORS; do
-		VECTORS_ABS="$VECTORS_ABS $(cygpath -m "$(realpath "$vec")")"
+		VECTORS_ABS="$VECTORS_ABS $(realpath "$vec")"
 	done
 
 	REPLY=$VECTORS_ABS
@@ -525,7 +523,7 @@ decode_single_file()
 
 	local info= src= dst=
 	info=$(cat info.kw)
-	dict_getValue "$info" src && src=$REPLY
+	dict_getValue "$info" src && src=$(winpath "$REPLY")
 	dict_getValue "$info" dst && dst=$REPLY
 
 	local recon=$(basename "$dst").yuv
@@ -746,6 +744,7 @@ parse_stdoutLog()
 		;;
 		*) error_exit "unknown encoder: $codecId";;
 	esac
+
 	echo "$fps"
 }
 

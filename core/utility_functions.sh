@@ -8,12 +8,31 @@ error_exit()
 	exit 1
 }
 
-cygpath() # just to keep working on *nix
+# The native windows applicationss do not recognize path name in a Cygwin (/cygdrive/c/...)
+# or Msys (/c/...) style. Cygwin/Msys tools accept windows path as well, but under WSL
+# buldin utils does not accept windows path.
+# So, we keep to variants
+#    winpath   -> C:/...
+#    unixpath  -> /cygdrive/c/..., /c/... or /mnt/c/... as defined by the environment
+#
+winpath() # ~= cygpath -w
 {
-	case $OS in 
-		*_NT) command cygpath "$@";;
-		*) echo "$2";;
+	local path=$1; shift
+	[ -n "${WSL_DISTRO_NAME:-}" ] && command wslpath -w "$path" && return
+	case ${OS:-} in 
+		*_NT) : ;;
+		*) echo "$path" && return;;
 	esac
+	# msys, cygwin, busybox
+	path=${path#/cygdrive} # cut prefix
+	case $path in 
+		/[a-zA-Z]/*) echo "${path:1:1}:${path:2}";;
+		*) echo "$path";;
+	esac
+}
+unixpath() # ~= cygpath -m
+{
+	command cygpath -m "$@"
 }
 
 relative_path()
@@ -51,13 +70,13 @@ print_console()
 	cut_to_console_width()
 	{
 		if [ -z "${COLUMNS:-}" ]; then
-			case $OS in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2) && export COLUMNS; esac
+			case ${OS:-} in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2) && export COLUMNS; esac
 		fi
 
 		# Note, Windows terminal inserts carriage character after printed string
 		# this results in line break if len(str) == NUM_COLUMNS. So we cut to NUM_COLUMNS-1 length
 		REPLY=$*
-		[ -n "${COLUMNS:-}" ] && [ "${#REPLY}" -ge "${COLUMNS:-}" ] && REPLY="${REPLY:0:$((COLUMNS - 4))}..."
+		[ -n "${COLUMNS:-}" ] && [ "${#REPLY}" -ge "${COLUMNS:-}" ] && REPLY="${REPLY:0:$((COLUMNS - 5))}..."
 
 		return 0
 	}

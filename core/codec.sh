@@ -91,7 +91,7 @@ codec_cmdSrc()
 {
 	local codecId=$1; shift
 	local src=$1; shift
-	src_${codecId} "$src"
+	src_${codecId} "$(winpath $src)"
 }
 codec_cmdDst()
 {
@@ -102,7 +102,7 @@ codec_cmdDst()
 codec_verify()
 {
 	local CODECS="$*" codecId= cmd= removeList=
-	local dirOut=$(cygpath -m $(mktemp -d))
+	local dirOut=$(winpath $(mktemp -d))
 
 	trap 'rm -rf -- "$dirOut"' EXIT
 
@@ -390,13 +390,13 @@ cmd_h265demo()
 	END_OF_CFG
 	)
 	local hash=$(echo "$cfg" | md5sum | base64)
-	local _dirScript=$(cygpath -m "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )")
+	local _dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 	local pathCfg="$_dirScript/persistent/h265demo-$hash.cfg"
 	if [ ! -f "$pathCfg" ]; then
 		mkdir -p "$(dirname "$pathCfg")"
 		echo "$cfg" > "$pathCfg"
 	fi
-	REPLY="-c $pathCfg $args"
+	REPLY="-c $(winpath "$pathCfg") $args"
 }
 
 exe_h264demo() { REPLY=$HW264_Encoder_DemoExe; }

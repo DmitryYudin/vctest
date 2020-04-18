@@ -8,7 +8,7 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 . "$dirScript/utility_functions.sh"
 
 readonly dirScript=$(cygpath -m "$dirScript")
-readonly bdratePy=$dirScript/bdrate/bdrate.py
+readonly bdratePy=$(winpath "$dirScript")/bdrate/bdrate.py
 readonly KEY_DELIM="\(^\| \)" # line start or space
 
 REF_CODEC=

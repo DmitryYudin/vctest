@@ -143,7 +143,7 @@ jobsReportProgress()
 	local str
 	printf -v str "$timestamp %s[$symDn%4s/%4s][$symUp%${runWidth}s]%4s|%s" "$status" $__jobsDone "$tot" $__jobsRunning "$label" "$__jobsDisplay"
 	if [ ${COLUMNS:-0} -gt 4 -a ${#str} -gt ${COLUMNS:-0} ]; then
-		str=${str:0:$(( COLUMNS - 4 ))}...
+		str=${str:0:$(( COLUMNS - 5 ))}...
 	fi
 	local CSI=$'\033[' RESET= CLR_R=
 	[ -t 1 ] && { CLR_R=${CSI}0K; RESET=${CSI}m; }
