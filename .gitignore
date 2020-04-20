@@ -20,6 +20,7 @@ build*/
 [0-9]
 [a-z].sh
 [a-z].bat
+options.txt
 testplan.txt
 *.json
 out*/

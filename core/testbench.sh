@@ -95,51 +95,22 @@ entrypoint()
 	# Remove codecs we can't run
 	codec_verify $CODECS && CODECS=$REPLY
 
+	local startSec=$SECONDS
 	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS" "$PRESETS"
 
+	local optionsFile=options.txt
+	prepare_optionsFile "$optionsFile"
+
 	local encodeList= decodeList= parseList= reportList=
-	local prm= src= codecId=
-	for prm in $PRMS; do
-	for src in $VECTORS; do
-	for codecId in $CODECS; do
-	for preset in $PRESETS; do
-		local qp=- bitrate=-
-		if [ $prm -lt 60 ]; then
-			qp=$prm
-		else
-			bitrate=$prm
-		fi
-		[ $preset == '-' ] && codec_default_preset "$codecId" && preset=$REPLY
+	while read info; do
+		local encCmdArgs
+		dict_getValueEOL "$info" encCmdArgs && encCmdArgs=$REPLY
+		info=${info%%encCmdArgs:*} # do not propogate cmdArgs
 
-		local srcRes= srcFps= srcNumFr=
-		detect_resolution_string "$src" && srcRes=$REPLY
-		detect_framerate_string "$src" && srcFps=$REPLY
-		detect_frame_num "$src" "$srcRes" && srcNumFr=$REPLY
-
-		local ext=h265; [ $codecId == h264demo ] && ext=h264
-
-		local args="--res "$srcRes" --fps $srcFps --threads $THREADS"
-		[ $bitrate == '-' ] || args="$args --bitrate $bitrate"
-		[ $qp == '-' ]     || args="$args --qp $qp"
-		[ $preset == '-' ] || args="$args --preset $preset"
-
-		local encExe= encExeHash= encCmdArgs= encCmdHash=
-		codec_exe $codecId && encExe=$REPLY
-		codec_hash $codecId && encExeHash=$REPLY
-		codec_cmdArgs $codecId $args && encCmdArgs=$REPLY
-		codec_cmdHash "$src" $encCmdArgs && encCmdHash=$REPLY
-
+		local encExeHash encCmdHash
+		dict_getValue "$info" encExeHash && encExeHash=$REPLY
+		dict_getValue "$info" encCmdHash && encCmdHash=$REPLY
 		local outputDir="$DIR_OUT/$encExeHash/$encCmdHash"
-
-		local SRC=${src//\\/}; SRC=${SRC##*[/\\]}
-		local dst="$SRC.$ext"
-
-		# readonly kw-file will be used across all processing stages
-		local info="codecId:$codecId srcRes:$srcRes srcFps:$srcFps srcNumFr:$srcNumFr QP:$qp BR:$bitrate PRESET:$preset"
-		info="$info TH:$THREADS SRC:$SRC encCmdHash:$encCmdHash src:$src dst:$dst"
-		echo "$info" > $outputDir/info.kw
-
-		progress_next "$outputDir"
 
 		local encode=false
 		if [ ! -f "$outputDir/encoded.ts" ]; then
@@ -152,9 +123,17 @@ entrypoint()
 			rm -rf "$outputDir"		# this alos force decoding and parsing
 			mkdir -p "$outputDir"
 
-			local encCmdSrc= encCmdDst=
+			local codecId= src= dst= encCmdSrc= encCmdDst=
+			dict_getValue "$info" codecId && codecId=$REPLY
+			dict_getValue "$info" encExe && encExe=$REPLY
+			dict_getValue "$info" src && src=$REPLY
+			dict_getValue "$info" dst && dst=$REPLY
+
 			codec_cmdSrc $codecId "$src" && encCmdSrc=$REPLY
 			codec_cmdDst $codecId "$dst" && encCmdDst=$REPLY
+
+			# readonly kw-file will be used across all processing stages
+			echo "$info" > $outputDir/info.kw
 
 			local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
 			echo "$cmd" > $outputDir/cmd
@@ -168,13 +147,13 @@ entrypoint()
 			parseList="$parseList $outputDir"
 		fi
 		reportList="$reportList $outputDir"
-	done
-	done
-	done
-	done
+
+		progress_next "$outputDir"
+
+	done < $optionsFile
+	rm -f $optionsFile
 	progress_end
 
-	local startSec=$SECONDS
 	local self
 	relative_path "$0" && self=$REPLY # just to make output look nicely
 
@@ -262,6 +241,66 @@ vectors_verify()
 	REPLY=$VECTORS_ABS
 }
 
+prepare_optionsFile()
+{
+	local optionsFile=$1; shift
+
+	local prm= src= codecId= preset= infoTmpFile=$(mktemp)
+	for prm in $PRMS; do
+	for src in $VECTORS; do
+	for codecId in $CODECS; do
+	for preset in $PRESETS; do
+		local qp=- bitrate=-
+		if [ $prm -lt 60 ]; then
+			qp=$prm
+		else
+			bitrate=$prm
+		fi
+		[ $preset == '-' ] && codec_default_preset "$codecId" && preset=$REPLY
+		local srcRes= srcFps= srcNumFr=
+		detect_resolution_string "$src" && srcRes=$REPLY
+		detect_framerate_string "$src" && srcFps=$REPLY
+		detect_frame_num "$src" "$srcRes" && srcNumFr=$REPLY
+
+		local args="--res "$srcRes" --fps $srcFps --threads $THREADS"
+		[ $bitrate == '-' ] || args="$args --bitrate $bitrate"
+		[ $qp == '-' ]     || args="$args --qp $qp"
+		[ $preset == '-' ] || args="$args --preset $preset"
+
+		local encExe= encExeHash= encCmdArgs= encCmdHash=
+		codec_exe $codecId && encExe=$REPLY
+		codec_hash $codecId && encExeHash=$REPLY
+		codec_cmdArgs $codecId $args && encCmdArgs=$REPLY
+
+		local SRC=${src//\\/}; SRC=${SRC##*[/\\]} # basename only
+		local ext=h265; [ $codecId == h264demo ] && ext=h264
+		local dst="$SRC.$ext"
+
+		local info="src:$src codecId:$codecId srcRes:$srcRes srcFps:$srcFps srcNumFr:$srcNumFr"
+		info="$info QP:$qp BR:$bitrate PRESET:$preset TH:$THREADS SRC:$SRC dst:$dst"
+		info="$info encExe:$encExe encExeHash:$encExeHash encCmdArgs:$encCmdArgs"
+		printf '%s\n' "$info"
+	done
+	done
+	done
+	done > $infoTmpFile
+
+	local hashTmpFile=$(mktemp)
+	while read data; do
+		local encCmdArgs SRC
+		dict_getValueEOL "$data" encCmdArgs && encCmdArgs=$REPLY
+		dict_getValue "$data" SRC && SRC=$REPLY
+		local args=${encCmdArgs// /}   # remove all whitespaces
+		echo "$SRC $args"
+	done < $infoTmpFile | python "$(winpath "$dirScript")/md5sum.py" | tr -d $'\r' > $hashTmpFile
+
+	local data encCmdHash
+	while IFS= read -u3 -r encCmdHash && IFS= read -u4 -r data; do 
+  		printf 'encCmdHash:%s %s\n' "$encCmdHash" "$data"
+	done 3<$hashTmpFile 4<$infoTmpFile > $optionsFile
+	rm $infoTmpFile $hashTmpFile
+}
+
 PERF_ID=
 start_cpu_monitor()
 {
@@ -343,7 +382,7 @@ progress_next()
 	dict_getValue "$info" PRESET   && PRESET=$REPLY
 	dict_getValue "$info" TH       && TH=$REPLY
 	dict_getValue "$info" SRC      && SRC=$REPLY
-	dict_getValue "$info" HASH     && HASH=$REPLY
+	dict_getValue "$info" encCmdHash && HASH=$REPLY
 	local str=
 	printf 	-v str "%4s %-8s %11s %5s %2s %6s" 	"$PROGRESS_CNT" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
 	printf 	-v str "%s %9s %2s %-16s %s"  		"$str" "$PRESET" "$TH" "${HASH::16}" "$SRC"

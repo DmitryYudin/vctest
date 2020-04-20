@@ -44,11 +44,25 @@ relative_path()
 	REPLY=$path
 }
 
+dict_checkKey()
+{
+	local dict=$1 key=$2; val=${dict#*$key:};
+	[ "$val" == "$dict" ] && return 1
+	return 0
+}
 dict_getValue()
 {
-	local dict=$1 key=$2; val=${dict#*$key:};	
+	local dict=$1 key=$2; val=${dict#*$key:};
+	[ "$val" == "$dict" ] && error_exit "can't find key=$key"
 	val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
 	val=${val%%[ $'\t']*} # Cut everything after left most whitespace
+	REPLY=$val
+}
+dict_getValueEOL()
+{
+	local dict=$1 key=$2; val=${dict#*$key:};
+	[ "$val" == "$dict" ] && error_exit "can't find key=$key"
+	val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
 	REPLY=$val
 }
 
