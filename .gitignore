@@ -24,3 +24,4 @@ testplan.txt
 out*/
 *tmp*/
 *result*/
+__pycache__
