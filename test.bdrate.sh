@@ -1,10 +1,5 @@
 set -eu -o pipefail
 
-#
-# BD-Rate evaluation example
-#
-[ "$#" -gt 0 ] && ./core/testbench.sh -h && exit
-
 #CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
 CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo"
 
@@ -28,7 +23,7 @@ readonly report="report/bdrate_$timestamp.log"
 
 # Generate logs
 VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
-./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "$PRMS" -o "$report"
+./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "$PRMS" -o "$report" "$@"
 
 # Calcultate BD-rate
 echo "$timestamp" >> bdrate.log

@@ -1,4 +1,4 @@
-set -eu
+set -eu -o pipefail
 
 # Sometimes, power-shell does not return error status as expected,
 # but it is more NTLM proxy friendly than curl.

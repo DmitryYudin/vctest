@@ -1,10 +1,5 @@
 set -eu -o pipefail
 
-#
-# This is a frontend example for the './core/testbench.sh' script
-#
-[ "$#" -gt 0 ] && ./core/testbench.sh -h && exit
-
 #CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
 CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo"
 #CODECS=ashevc
@@ -16,5 +11,6 @@ case 0 in
 	1)	BITRATE="1500  2000 3000  4000"; VECTORS="FourPeople_1280x720_30.y4m.yuv tears_of_steel_1280x720_24.webm.yuv";;
 esac
 
+echo "Run with '--ncpu 1' to get correct performance estimation"
 VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
-./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "${QP:-} ${BITRATE:-}" -o report/report.log
+./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "${QP:-} ${BITRATE:-}" -o report/report.log "$@"
