@@ -16,6 +16,15 @@ cygpath() # just to keep working on *nix
 	esac
 }
 
+relative_path()
+{
+	local file=$1
+	local cwd=$(pwd -P)
+	local path="$(cd "$(dirname "$file")"; pwd -P)/${file##*[/\\]}"
+	case $path in $cwd/*) path=./${path#$cwd/}; esac
+	REPLY=$path
+}
+
 dict_getValue()
 {
 	local dict=$1 key=$2; val=${dict#*$key:};	

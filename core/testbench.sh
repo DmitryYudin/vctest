@@ -17,7 +17,8 @@ VECTORS="
 	$dirScript/../vectors/foreman_cif.yuv
 "
 DIR_OUT='out'
-
+TESTPLAN=testplan.txt
+NCPU=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
 
@@ -35,6 +36,7 @@ usage()
 	    -c|--codec    Codecs list. Default: "$CODECS".
 	    -t|--threads  Number of threads to use
 	    -p|--prms     Bitrate (kbps) or QP list. Default: "$PRMS".
+	                  Values less than 60 considered as QP.
 	       --preset   Codec-specific list of 'preset' options (default: marked by *):
 	                  ashevc:   *1 2 3 4 5 6
 	                  x265:     *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
@@ -44,14 +46,17 @@ usage()
 	                  intel_hw:                       veryfast  faster fast medium slow slower veryslow
 	                  h265demo: 6 *5 4 3 2 1
 	                  h264demo: N/A
+	    -j|--ncpu     Number of encoders to run in parallel. The value of '0' will run as many encoders as many
+	                  CPUs available. Default: $NCPU
+	                  Note, execution time based profiling data (CPU consumption and FPS estimation) is not
+	                  available in parallel execution mode.
 	       --hide     Do not print legend and header
-	Note, 'prms' values less than 60 considered as QP.
 	EOF
 }
 
 entrypoint()
 {
-	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut=
+	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut= cmd_ncpu=
 	local hide_banner=
 	while [ "$#" -gt 0 ]; do
 		local nargs=2
@@ -64,7 +69,9 @@ entrypoint()
 			-t|--thread*)   cmd_threads=$2;;
 			-p|--prm*) 		cmd_prms=$2;;
 			   --pre*) 		cmd_presets=$2;;
+			-j|--ncpu)		cmd_ncpu=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
+			   --)			shift; NCPU=0 "$@"; return $?;;
 			*) error_exit "unrecognized option '$1'"
 		esac
 		shift $nargs
@@ -76,7 +83,11 @@ entrypoint()
 	[ -n "$cmd_threads" ] && THREADS=$cmd_threads
 	[ -n "$cmd_prms" ] && PRMS=$cmd_prms
 	[ -n "$cmd_presets" ] && PRESETS=$cmd_presets
+	[ -n "$cmd_ncpu" ] && NCPU=$cmd_ncpu
 	PRESETS=${PRESETS:--}
+
+	# for multithreaded run, run in single process to get valid cu usage estimation
+	[ $THREADS -gt 1 ] && NCPU=1
 
 	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
 
@@ -161,31 +172,48 @@ entrypoint()
 	done
 	progress_end
 
+	local startSec=$SECONDS
+	local self
+	relative_path "$0" && self=$REPLY # just to make output look nicely
+
 	progress_begin "[2/5] Encoding..." "$encodeList"
 	for outputDir in $encodeList; do
-
-		progress_next "$outputDir"
-
-		encode_single_file "$outputDir" > /dev/null
+		if [ $NCPU -ne 1 ]; then
+			echo "$self -- encode_single_file \"$outputDir\"" >> $TESTPLAN
+		else
+			progress_next "$outputDir"
+			encode_single_file "$outputDir" > /dev/null
+		fi
 	done
+	[ $NCPU -ne 1 -a -f $TESTPLAN ] && "$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
 	progress_end
 
+	NCPU=-1 # use (all+1) cores for decoding
 	progress_begin "[3/5] Decoding..." "$decodeList"
 	for outputDir in $decodeList; do
-
-		progress_next "$outputDir"
-
-        decode_single_file "$outputDir" > /dev/null
+		if [ $NCPU -ne 1 ]; then
+			echo "$self -- decode_single_file \"$outputDir\"" >> $TESTPLAN
+		else
+			progress_next "$outputDir"
+			decode_single_file "$outputDir" > /dev/null
+		fi
 	done
+	[ $NCPU -ne 1 -a -f $TESTPLAN ] && "$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
 	progress_end
 
+	# in parsing procedure Bash spawns many processes, this leads to significant slowdown
+	# introduced by antivirus software
+	NCPU=-16 # use (all + 16) cores
 	progress_begin "[4/5] Parsing..." "$parseList"
 	for outputDir in $parseList; do
-
-		progress_next "$outputDir"
-
-		parse_single_file "$outputDir" > /dev/null
+		if [ $NCPU -ne 1 ]; then
+			echo "$self -- parse_single_file \"$outputDir\"" >> $TESTPLAN
+		else
+			progress_next "$outputDir"
+			parse_single_file "$outputDir" > /dev/null
+		fi
 	done
+	[ $NCPU -ne 1 -a -f $TESTPLAN ] && "$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
 	progress_end
 
 	progress_begin "[5/5] Reporting..."	"$reportList"
@@ -203,7 +231,9 @@ entrypoint()
 	done
 	progress_end
 
-	print_console "$REPORT\n"
+	local duration=$(( SECONDS - startSec ))
+	duration=$(date +%H:%M:%S -u -d @${duration})
+	print_console "$duration >>>> $REPORT\n"
 }
 
 vectors_verify()
@@ -273,6 +303,8 @@ progress_begin()
 	PROGRESS_INFO=
 	PROGRESS_CNT_TOT=1
 	PROGRESS_CNT=0
+	rm -f $TESTPLAN
+
 	for str; do
 		list_size "$1" && PROGRESS_CNT_TOT=$(( PROGRESS_CNT_TOT * REPLY))
 		shift
@@ -401,7 +433,7 @@ output_report()
 	dict_getValue "$dict" encCmdHash && HASH=$REPLY
 
 	local str=
-	printf 	-v str    "%6s %6.0f %5.0f %5.0f"          "$extFPS" "$intFPS" "$cpu" "$kbps"
+	printf 	-v str    "%6s %6.0f %5s %5.0f"            "$extFPS" "$intFPS" "$cpu" "$kbps"
 	printf 	-v str "%s %3d %7.0f %6.0f %4.1f"   "$str" "$numI" "$avgI" "$avgP" "$peak"
 	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f" "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
 	printf 	-v str "%s %-8s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
@@ -442,9 +474,21 @@ encode_single_file()
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
 
-	# Start CPU monitor
-	trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
-	start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
+	local do_cpu_monitor=true
+
+	# Do not estimate execution time if
+	# 	- running in parallel
+	#	- under WSL (does not see typeperf )
+	# TODO: posix compatible monitor
+	if [ $NCPU -ne 1 -o -n "${WSL_DISTRO_NAME:-}" ]; then
+		do_cpu_monitor=false
+	fi
+
+	if $do_cpu_monitor; then
+		# Start CPU monitor
+		trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
+		start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
+	fi
 
 	# Encode
 	local consumedSec=$(date +%s%3N) # seconds*1000
@@ -455,13 +499,15 @@ encode_single_file()
 	fi
 	consumedSec=$(( $(date +%s%3N) - consumedSec ))
 
-	# Stop CPU monitor
-	stop_cpu_monitor
-	trap -- EXIT
+	if $do_cpu_monitor; then
+		# Stop CPU monitor
+		stop_cpu_monitor
+		trap -- EXIT
 
-	local fps=0
-	[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
-	echo "$fps" > $fpsLog
+		local fps=0
+		[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
+		echo "$fps" > $fpsLog
+	fi
 
 	date "+%Y.%m.%d-%H.%M.%S" > encoded.ts
 
@@ -552,9 +598,14 @@ parse_single_file()
 	local fpsLog=fps.log
 	local summaryLog=summary.log
 
-	local cpuAvg= extFPS= intFPS= framestat=
-	cpuAvg=$(parse_cpuLog "$cpuLog")
-	extFPS=$(cat "$fpsLog")
+	local cpuAvg=- extFPS=- intFPS= framestat=
+	if [ -f "$cpuLog" ]; then # may not exist
+		cpuAvg=$(parse_cpuLog "$cpuLog")
+		printf -v cpuAvg "%.0f" "$cpuAvg"
+	fi
+	if [ -f "$fpsLog" ]; then # may not exist
+		extFPS=$(cat "$fpsLog")
+	fi
 	intFPS=$(parse_stdoutLog "$codecId" "$stdoutLog")
 	framestat=$(parse_framestat "$kbpsLog" "$summaryLog")
 
