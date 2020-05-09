@@ -1,5 +1,6 @@
 set -eu -o pipefail
 
+# first codec used as the reference
 #CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
 CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo"
 
@@ -27,4 +28,4 @@ VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
 
 # Calcultate BD-rate
 echo "$timestamp" >> bdrate.log
-./core/bdrate.sh -c ashevc -i ${report%.*}.kw | tee -a bdrate.log
+./core/bdrate.sh -c ${CODECS%% *} -i ${report%.*}.kw | tee -a bdrate.log
