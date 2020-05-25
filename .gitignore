@@ -15,6 +15,7 @@ build*/
 *.bits
 *.cfg
 *.7z
+*.stamp
 [0-9]
 [a-z].sh
 [a-z].bat
