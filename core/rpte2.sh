@@ -44,6 +44,75 @@ jobsStartPing()
 	} </dev/null 1>/dev/null 2>/dev/null &
 }
 
+#
+# Execute single task with output streams redirected to $tempPath/$id.stream.log
+# Set exist status to task execution status.
+#
+# For the '$cmd' argument the variables substitution is executed first. Thus,
+# any string starting with a '$' sign is expanded in the current Bash context:
+#     cmd="test -i $dirVec/name -o $dirOut/name.out"
+# The result of the expansion must be a simple command, i.e. not a command list
+# separated with ';' or piped commands or composed commands ('&&', '||'). Due
+# to expansion stage all braces must be escaped:
+#     cmd="test -i \"name with whitespaces/name\" -o $dirOut/name.out"
+#
+executeSingleTask()
+{
+	local id=$1; shift	
+	local cmd=$1; shift
+	local userText=$1; shift
+	local userFlags=$1; shift
+	local x=
+
+	# Append flags to command-line
+	cmd=$cmd${userFlags:+ "$userFlags"}
+
+	# Prepare command line
+	eval 'set -- $cmd'
+	for x; do shift;
+		x=$(eval printf "%s" "$x") # can't use 'echo' here due to '-e'
+		set -- "$@" "$x"
+	done
+
+	# Hack. Update cmd with evaluated parameters (just for debugging)
+	runningTaskCmd="$@"
+
+	# Prepare redirections
+	exec 3>"$tempPath/$id.stdout.log"
+	[ $__jobsStderrToStdout == 0 ] && exec 4>"$tempPath/$id.stderr.log"
+	[ $__jobsStderrToStdout != 0 ] && exec 4>&3
+
+	# Run
+	local error_code=0
+	{
+		"$@"
+        error_code=$?
+		[ -n "$userText" ] && echo "$userText"
+	} </dev/null 1>&3 2>&4 3>&- 4>&-
+	exec 3>&- 4>&-
+
+	return $error_code
+}
+
+#
+# Worker
+#
+# Run worker process with the first task specified in the arguments list. Upon
+# completion, the execution status is written into statusPIPE. If task succeded,
+# next task is read from the workPipe and executed (and so on), otherwise worker
+# thread exits.
+# Note, we intentionly does not check execution status explicitly. Instead, we
+# relies on Bash errexit mode which trigs exception on a Bash command failure.
+# We catch this exception with the EXIT signal trap. The reason for this 
+# behaviour is that master process expects us a response for every tasks read
+# from a workPIPE (and exactly ONE response). When receiving any signal (ex.
+# Ctrl^C press) we check whether the task is currently running, and if running
+# we report fail execution status before leaving the process(self). In total,
+# for each request (task read) we report completion status once and report
+# additional 'process exit' status if we were interrupted. We report nothing 
+# on normal process exit. We still may catch a race condition if interrupt
+# appears in between writing to the statusPIPE and clearing the 'runningTaskId'
+# variable.
 jobsStartWorker()
 {
 	local -
@@ -66,24 +135,11 @@ jobsStartWorker()
 
 	# Continue reading while pipe exist
 	while : ; do
-		# Prepare command line
-		eval 'set -- $cmd'
-		for x; do shift; set -- "$@" "$(eval echo "$x")"; done
-
-		# Prepare redirections
-		exec 3>"$tempPath/$id.stdout.log"
-		[ $__jobsStderrToStdout == 0 ] && exec 4>"$tempPath/$id.stderr.log"
-		[ $__jobsStderrToStdout != 0 ] && exec 4>&3
-
-		# Run
 		runningTaskId=$id
 		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
-		{ # -errexit option set above!
-			"$@"${userFlags:+ "$userFlags"}
-			[ -n "$userText" ] && echo "$userText"
-		} </dev/null 1>&3 2>&4 3>&- 4>&-
-		exec 3>&- 4>&-
-		# Aways report successfull status since exit trap expected to trig on failure
+       	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
+
+		# Report successful status since exit trap is expected to trig on failure
 		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd"$ARG_DELIM > $__jobsStatusPipe
 		runningTaskId=
 		runningTaskCmd=
