@@ -112,10 +112,6 @@ entrypoint()
 
 	local encodeList= decodeList= parseList= reportList=
 	while read info; do
-		local encCmdArgs
-		dict_getValueEOL "$info" encCmdArgs; encCmdArgs=$REPLY
-		info=${info%%encCmdArgs:*} # do not propogate cmdArgs
-
 		local encExeHash encCmdHash
 		dict_getValue "$info" encExeHash; encExeHash=$REPLY
 		dict_getValue "$info" encCmdHash; encCmdHash=$REPLY
@@ -133,20 +129,8 @@ entrypoint()
 			rm -rf "$outputDir"		# this alos force decoding and parsing
 			mkdir -p "$outputDir"
 
-			local codecId= src= dst= encCmdSrc= encCmdDst=
-			dict_getValue "$info" codecId; codecId=$REPLY
-			dict_getValue "$info" encExe; encExe=$REPLY
-			dict_getValue "$info" src; src=$REPLY
-			dict_getValue "$info" dst; dst=$REPLY
-
-			codec_cmdSrc $codecId "$src"; encCmdSrc=$REPLY
-			codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
-
 			# readonly kw-file will be used across all processing stages
 			echo "$info" > $outputDir/info.kw
-
-			local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
-			echo "$cmd" > $outputDir/cmd
 
 			encodeList="$encodeList $outputDirRel"
 		fi
@@ -535,15 +519,20 @@ encode_single_file()
 	local outputDir="$DIR_OUT/$outputDirRel"
 	pushd "$outputDir"
 
-	local info= codecId= src= dst= srcNumFr=
+	local info= encCmdArgs= codecId= src= dst= encCmdSrc= encCmdDst= srcNumFr=
 	info=$(cat info.kw)
+	dict_getValueEOL "$info" encCmdArgs; encCmdArgs=$REPLY
 	dict_getValue "$info" codecId; codecId=$REPLY
-	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
+	dict_getValue "$info" encExe; encExe=$REPLY
 	dict_getValue "$info" src; src=$REPLY
 	dict_getValue "$info" dst; dst=$REPLY
+	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
-	local cmd=
-	cmd=$(cat cmd)
+	codec_cmdSrc $codecId "$src"; encCmdSrc=$REPLY
+	codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
+
+	local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
+	echo "$cmd" > cmd # memorize
 
 	local stdoutLog=stdout.log
 	local cpuLog=cpu.log
