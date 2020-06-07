@@ -15,7 +15,6 @@ VECTORS="
 	$dirScript/../vectors/foreman_cif.yuv
 "
 DIR_OUT='out'
-TESTPLAN=testplan.txt
 NCPU=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
@@ -168,15 +167,17 @@ entrypoint()
 	local self
 	relative_path "$0"; self=$REPLY # just to make output look nicely
 
+	local testplan=testplan.txt
+
 	#
 	# Encoding
 	#
 	progress_begin "[2/5] Encoding..." "$encodeList"
 	if [ -n "$encodeList" ]; then
 		for outputDirRel in $encodeList; do
-			echo "$self --ncpu $NCPU -- encode_single_file \"$outputDirRel\"" >> $TESTPLAN
-		done
-		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+			echo "$self --ncpu $NCPU -- encode_single_file \"$outputDirRel\""
+		done > $testplan
+		execute_plan $testplan $NCPU
 	fi
 	progress_end
 
@@ -187,9 +188,9 @@ entrypoint()
 	progress_begin "[3/5] Decoding..." "$decodeList"
 	if [ -n "$decodeList" ]; then
 		for outputDirRel in $decodeList; do
-			echo "$self -- decode_single_file \"$outputDirRel\"" >> $TESTPLAN
-		done
-		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+			echo "$self -- decode_single_file \"$outputDirRel\""
+		done > $testplan
+		execute_plan $testplan $NCPU
 	fi
 	progress_end
 
@@ -200,11 +201,13 @@ entrypoint()
 	progress_begin "[4/5] Parsing..." "$parseList"
 	if [ -n "$parseList" ]; then
 		for outputDirRel in $parseList; do
-			echo "$self -- parse_single_file \"$outputDirRel\"" >> $TESTPLAN
-		done
-		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+			echo "$self -- parse_single_file \"$outputDirRel\""
+		done > $testplan
+		execute_plan $testplan $NCPU
 	fi
 	progress_end
+
+	rm -f -- $testplan
 
 	#
 	# Reporting
@@ -313,6 +316,13 @@ prepare_optionsFile()
 	rm $infoTmpFile $hashTmpFile
 }
 
+execute_plan()
+{
+	local testplan=$1; shift
+	local ncpu=$1; shift
+	"$dirScript/rpte2.sh" $testplan -p tmp -j $ncpu
+}
+
 PERF_ID=
 start_cpu_monitor()
 {
@@ -356,7 +366,6 @@ progress_begin()
 	PROGRESS_INFO=
 	PROGRESS_CNT_TOT=1
 	PROGRESS_CNT=0
-	rm -f $TESTPLAN
 
 	for str; do
 		list_size "$1"; PROGRESS_CNT_TOT=$(( PROGRESS_CNT_TOT * REPLY))
