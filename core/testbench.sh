@@ -342,8 +342,15 @@ start_cpu_monitor()
 	esac
 
 	local name=$(basename "$encoderExe"); name=${name%.*}
-	typeperf '\Process('$name')\% Processor Time' &
-	PERF_ID=$!
+
+	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
+	if [ $cpu_monitor_type == windows ]; then
+		typeperf '\Process('$name')\% Processor Time' &
+		PERF_ID=$!
+	else
+		# TODO: posix compatible monitor
+		:
+	fi
 }
 stop_cpu_monitor()
 {
@@ -542,17 +549,13 @@ encode_single_file()
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
 
-	local do_cpu_monitor=true
-
-	# Do not estimate execution time if
-	# 	- running in parallel
-	#	- under WSL (does not see typeperf )
-	# TODO: posix compatible monitor
-	if [ $NCPU -ne 1 -o -n "${WSL_DISTRO_NAME:-}" ]; then
-		do_cpu_monitor=false
+	# Make estimates only if one instance of the encoder is running at a time
+	local estimate_execution_time=false
+	if [ $NCPU == 1 ]; then
+		estimate_execution_time=true
 	fi
 
-	if $do_cpu_monitor; then
+	if $estimate_execution_time; then
 		# Start CPU monitor
 		trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
 		start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
@@ -567,14 +570,14 @@ encode_single_file()
 	fi
 	consumedSec=$(( $(date +%s%3N) - consumedSec ))
 
-	if $do_cpu_monitor; then
-		# Stop CPU monitor
-		stop_cpu_monitor
-		trap -- EXIT
-
+	if $estimate_execution_time; then
 		local fps=0
 		[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
 		echo "$fps" > $fpsLog
+
+		# Stop CPU monitor
+		stop_cpu_monitor
+		trap -- EXIT
 	fi
 
 	date "+%Y.%m.%d-%H.%M.%S" > encoded.ts
@@ -771,14 +774,21 @@ parse_framestat()
 parse_cpuLog()
 {
 	local log=$1; shift
-: <<'FORMAT'
-                                                                             < skip (first line is empty)
-"(PDH-CSV 4.0)","\\DESKTOP-7TTKF98\Process(sample_encode)\% Processor Time"  < skip
-"04/02/2020 07:37:58.154","388.873717"                                       < count average
-"04/02/2020 07:37:59.205","390.385101"
-FORMAT
-	cat "$log" | tail -n +3 | cut -d, -f 2 | tr -d \" | 
-			awk '{ if ( $1 != "" && $1 > 0 ) { sum += $1; cnt++; } } END { print cnt !=0 ? sum / cnt : 0 }'
+	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
+
+	if [ $cpu_monitor_type == windows ]; then
+#: <<'FORMAT'
+#                                                                             < skip (first line is empty)
+#"(PDH-CSV 4.0)","\\DESKTOP-7TTKF98\Process(sample_encode)\% Processor Time"  < skip
+#"04/02/2020 07:37:58.154","388.873717"                                       < count average
+#"04/02/2020 07:37:59.205","390.385101"
+#FORMAT
+		cat "$log" | tail -n +3 | cut -d, -f 2 | tr -d \" | 
+				awk '{ if ( $1 != "" && $1 > 0 ) { sum += $1; cnt++; } } END { print cnt !=0 ? sum / cnt : 0 }'
+	else
+		# TODO: posix compatible monitor
+		:
+	fi
 }
 
 parse_stdoutLog()
