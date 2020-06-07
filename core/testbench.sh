@@ -54,7 +54,7 @@ usage()
 
 entrypoint()
 {
-	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut= cmd_ncpu=
+	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut= cmd_ncpu= cmd_endofflags=
 	local hide_banner=
 	while [ "$#" -gt 0 ]; do
 		local nargs=2
@@ -69,10 +69,11 @@ entrypoint()
 			   --pre*) 		cmd_presets=$2;;
 			-j|--ncpu)		cmd_ncpu=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
-			   --)			shift; NCPU=0 "$@"; return $?;;
+			   --)			cmd_endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
 		shift $nargs
+		[ -n "$cmd_endofflags" ] && break
 	done
 	[ -n "$cmd_dirOut" ] && DIR_OUT=$cmd_dirOut
 	[ -n "$cmd_report" ] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}.kw
@@ -83,9 +84,14 @@ entrypoint()
 	[ -n "$cmd_presets" ] && PRESETS=$cmd_presets
 	[ -n "$cmd_ncpu" ] && NCPU=$cmd_ncpu
 	PRESETS=${PRESETS:--}
-
-	# for multithreaded run, run in single process to get valid cu usage estimation
+	# for multithreaded run, run in single process to get valid cpu usage estimation
 	[ $THREADS -gt 1 ] && NCPU=1
+
+	if [ -n "$cmd_endofflags" ]; then
+		echo "exe: $@"
+		"$@"
+		return $?
+	fi
 
 	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
 
@@ -96,6 +102,10 @@ entrypoint()
 	codec_verify $CODECS && CODECS=$REPLY
 
 	local startSec=$SECONDS
+
+	#
+	# Scheduling
+	#
 	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS" "$PRESETS"
 
 	local optionsFile=options.txt
@@ -157,46 +167,47 @@ entrypoint()
 	local self
 	relative_path "$0" && self=$REPLY # just to make output look nicely
 
+	#
+	# Encoding
+	#
 	progress_begin "[2/5] Encoding..." "$encodeList"
-	for outputDir in $encodeList; do
-		if [ $NCPU -ne 1 ]; then
-			echo "$self -- encode_single_file \"$outputDir\"" >> $TESTPLAN
-		else
-			progress_next "$outputDir"
-			encode_single_file "$outputDir" > /dev/null
-		fi
-	done
-	[ $NCPU -ne 1 -a -f $TESTPLAN ] && "$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+	if [ -n "$encodeList" ]; then
+		for outputDir in $encodeList; do
+			echo "$self --ncpu $NCPU -- encode_single_file \"$outputDir\"" >> $TESTPLAN
+		done
+		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+	fi
 	progress_end
 
+	#
+	# Decoding
+	#
 	NCPU=-1 # use (all+1) cores for decoding
 	progress_begin "[3/5] Decoding..." "$decodeList"
-	for outputDir in $decodeList; do
-		if [ $NCPU -ne 1 ]; then
+	if [ -n "$decodeList" ]; then
+		for outputDir in $decodeList; do
 			echo "$self -- decode_single_file \"$outputDir\"" >> $TESTPLAN
-		else
-			progress_next "$outputDir"
-			decode_single_file "$outputDir" > /dev/null
-		fi
-	done
-	[ $NCPU -ne 1 -a -f $TESTPLAN ] && "$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+		done
+		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+	fi
 	progress_end
 
-	# in parsing procedure Bash spawns many processes, this leads to significant slowdown
-	# introduced by antivirus software
+	#
+	# Parsing
+	#
 	NCPU=-16 # use (all + 16) cores
 	progress_begin "[4/5] Parsing..." "$parseList"
-	for outputDir in $parseList; do
-		if [ $NCPU -ne 1 ]; then
+	if [ -n "$parseList" ]; then
+		for outputDir in $parseList; do
 			echo "$self -- parse_single_file \"$outputDir\"" >> $TESTPLAN
-		else
-			progress_next "$outputDir"
-			parse_single_file "$outputDir" > /dev/null
-		fi
-	done
-	[ $NCPU -ne 1 -a -f $TESTPLAN ] && "$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+		done
+		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
+	fi
 	progress_end
 
+	#
+	# Reporting
+	#
 	progress_begin "[5/5] Reporting..."	"$reportList"
 	if [ -z "$hide_banner" ]; then
 		readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
