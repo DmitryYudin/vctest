@@ -120,7 +120,8 @@ entrypoint()
 		local encExeHash encCmdHash
 		dict_getValue "$info" encExeHash && encExeHash=$REPLY
 		dict_getValue "$info" encCmdHash && encCmdHash=$REPLY
-		local outputDir="$DIR_OUT/$encExeHash/$encCmdHash"
+		local outputDirRel="$encExeHash/$encCmdHash"
+		local outputDir="$DIR_OUT/$outputDirRel"
 
 		local encode=false
 		if [ ! -f "$outputDir/encoded.ts" ]; then
@@ -148,17 +149,17 @@ entrypoint()
 			local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
 			echo "$cmd" > $outputDir/cmd
 
-			encodeList="$encodeList $outputDir"
+			encodeList="$encodeList $outputDirRel"
 		fi
 		if [ ! -f "$outputDir/decoded.ts" ]; then
-			decodeList="$decodeList $outputDir"
+			decodeList="$decodeList $outputDirRel"
 		fi
 		if [ ! -f "$outputDir/parsed.ts" ]; then
-			parseList="$parseList $outputDir"
+			parseList="$parseList $outputDirRel"
 		fi
-		reportList="$reportList $outputDir"
+		reportList="$reportList $outputDirRel"
 
-		progress_next "$outputDir"
+		progress_next "$outputDirRel"
 
 	done < $optionsFile
 	rm -f $optionsFile
@@ -172,8 +173,8 @@ entrypoint()
 	#
 	progress_begin "[2/5] Encoding..." "$encodeList"
 	if [ -n "$encodeList" ]; then
-		for outputDir in $encodeList; do
-			echo "$self --ncpu $NCPU -- encode_single_file \"$outputDir\"" >> $TESTPLAN
+		for outputDirRel in $encodeList; do
+			echo "$self --ncpu $NCPU -- encode_single_file \"$outputDirRel\"" >> $TESTPLAN
 		done
 		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
 	fi
@@ -185,8 +186,8 @@ entrypoint()
 	NCPU=-1 # use (all+1) cores for decoding
 	progress_begin "[3/5] Decoding..." "$decodeList"
 	if [ -n "$decodeList" ]; then
-		for outputDir in $decodeList; do
-			echo "$self -- decode_single_file \"$outputDir\"" >> $TESTPLAN
+		for outputDirRel in $decodeList; do
+			echo "$self -- decode_single_file \"$outputDirRel\"" >> $TESTPLAN
 		done
 		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
 	fi
@@ -198,8 +199,8 @@ entrypoint()
 	NCPU=-16 # use (all + 16) cores
 	progress_begin "[4/5] Parsing..." "$parseList"
 	if [ -n "$parseList" ]; then
-		for outputDir in $parseList; do
-			echo "$self -- parse_single_file \"$outputDir\"" >> $TESTPLAN
+		for outputDirRel in $parseList; do
+			echo "$self -- parse_single_file \"$outputDirRel\"" >> $TESTPLAN
 		done
 		"$dirScript/rpte2.sh" $TESTPLAN -p tmp -j $NCPU
 	fi
@@ -217,9 +218,9 @@ entrypoint()
 		output_legend
 		output_header
 	fi
-	for outputDir in $reportList; do
-		progress_next "$outputDir"
-		report_single_file "$outputDir"
+	for outputDirRel in $reportList; do
+		progress_next "$outputDirRel"
+		report_single_file "$outputDirRel"
 	done
 	progress_end
 
@@ -373,7 +374,9 @@ progress_begin()
 }
 progress_next()
 {
-	local outputDir=$1 info=
+	local outputDirRel=$1; shift
+	local outputDir="$DIR_OUT/$outputDirRel" info=
+
 	info=$(cat $outputDir/info.kw)
 
 	if [ -n "$PROGRESS_HDR" ]; then
@@ -500,7 +503,8 @@ output_report()
 
 report_single_file()
 {
-	local outputDir=$1; shift
+	local outputDirRel=$1; shift
+	local outputDir="$DIR_OUT/$outputDirRel"
 
 	local info= report=
 	info=$(cat "$outputDir/info.kw")
@@ -511,9 +515,9 @@ report_single_file()
 
 encode_single_file()
 {
-	local outputDir=$1; shift
+	local outputDirRel=$1; shift
+	local outputDir="$DIR_OUT/$outputDirRel"
 	pushd "$outputDir"
-
 
 	local info= codecId= src= dst= srcNumFr=
 	info=$(cat info.kw)
@@ -571,7 +575,8 @@ encode_single_file()
 
 decode_single_file()
 {
-	local outputDir=$1; shift
+	local outputDirRel=$1; shift
+	local outputDir="$DIR_OUT/$outputDirRel"
 	pushd "$outputDir"
 
 	local info= src= dst=
@@ -640,7 +645,8 @@ decode_single_file()
 
 parse_single_file()
 {
-	local outputDir=$1; shift
+	local outputDirRel=$1; shift
+	local outputDir="$DIR_OUT/$outputDirRel"
 	pushd "$outputDir"
 
 	local info= codecId=
