@@ -4,7 +4,46 @@
 #
 set -eu -o pipefail
 
-ENABLE_NAMED_PIPE=1
+ENABLE_NAMED_PIPE=${ENABLE_NAMED_PIPE:-1}
+
+usage()
+{
+	cat<<-\EOT
+	Parallel task executor in Bash.
+
+	This script reads a text file (testplan), where each line is a simple shell 
+	command. For each line, the substitution of shell variables is performed,
+	followed by the execution of the resulting expression. No more commands are
+	scheduled if execution failed. Instead, the stdout/stderr logs are printed
+	on the screen, all scheduled commands are waited to complete and script
+	terminates with nonzero status.
+
+	Normally, only execution progress is displayed. Each task is executed with
+	the output streams redirected to a '$tempPath/$id.std{out,err}.log' files
+	where 'id' is an auto incremented number or an  unique tag specified as a
+	command prefix.
+
+	This script requires bash to use 'errexit' mode. Do not call it as a part
+	of composed shell command, see 'set -e' description at
+	https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html
+
+	Usage:
+	    rpte.sh <testplan> [options]
+
+	Options:
+	    -h|--help    Print this help
+	       --test    Run test
+	    -p <path>    Temporary path for stdout/stderr logs
+	    -j <n>       Maximum number of tasks running in parallel (default: 1)
+	                    = 0 - all CPUs
+	                    < 0 - all CPUs + |n|
+	    -d <char>    Task id delimiter: ':', ' ', ... . If not set, the Id is
+	                 generated automatically in the execution order (default: auto)
+	    -t <text>    Text message to append to stdout log for every executed task
+	    -f <flags>   Flags to append to a command line for every task
+EOT
+# 'R' for 'reliable'
+}
 
 entrypoint()
 {
@@ -14,22 +53,32 @@ entrypoint()
 	[ -n "${WSL_DISTRO_NAME:-}" ] && ENABLE_NAMED_PIPE=0 # broken
 	readonly ENABLE_NAMED_PIPE
 
-if [ 1 == 1 ]; then
-	jobsRunTasks "$@"
-else
-	cat tasks.txt | sed -e "s/'\r'$//" -e "s/[[:space:]]*$//" -e "s/^[[:space:]]*//" -e "s/[[:space:]]*:[[:space:]]*/:/" -e "s/[[:space:]]+/ /"| paste > tasks2.txt
+	local do_test=false
+	for arg do
+		shift
+		case $arg in
+			-h|--help) usage; return;;
+			   --test) do_test=true;;
+			*) set -- "$@" "$arg";;
+		esac
+	done
 
-	local tempPath="tmp/$(date "+%Y.%m.%d-%H.%M.%S")"
-	mkdir -p $tempPath
-	cd $tempPath >>/dev/null
-	jobsRunTasks ../../tasks2.txt -j1 #-d':'
-	cd - >/dev/null
-	if ! jobsGetStatus; then
-		echo "Complete with error"
+	if ! $do_test; then
+		jobsRunTasks "$@"
+		jobsGetStatus || return 1
 	else
+		cat <<-'EOF' > tasks.txt
+			echo hello1
+			#false
+			echo hello2
+			true
+			ping localhost
+			#false
+		EOF
+		jobsRunTasks tasks.txt -j2 -p tmp
+		jobsGetStatus || { echo "Complete with error" && return 1; }
 		echo "Success"
 	fi
-fi
 }
 
 # Progress reported to stdout (since report progress on interrupt)
@@ -332,6 +381,8 @@ jobsRunTasks()
 		esac
 	done
 	[ -z "$taskTxt" ] && { echo "error: not task file" >&2 && return 1; }
+	[ ! -f "$taskTxt" ] && { echo "error: task file $taskTxt does not exist" >&2 && return 1; }
+
 	# Get last cpu index. We are going to use NCPU-1 cores to run
 	if [ "$runMax" -le 0 ]; then
 		x="$(grep 'processor' /proc/cpuinfo)"; x="${x##* }"; # last cpu index
@@ -409,7 +460,8 @@ jobsRunTasks()
 			{ kill -s KILL $__jobsPid && wait $__jobsPid || true; } 2>/dev/null
 			__jobsPid=
 		fi
-		[ $__jobsInterruptCnt -ge 3 ] && exit 127
+#		[ $__jobsInterruptCnt -ge 3 ] && exit 127
+		exit 127
 
 		return 0
 	}
@@ -547,8 +599,6 @@ jobsRunTasks()
 
 	# Do cleanup
 	jobsOnEXIT || true
-
-	jobsGetStatus
 }
 
 entrypoint "$@"
