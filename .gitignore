@@ -5,6 +5,8 @@ build*/
 *.dll
 *.mp4
 *.webm
+*.h265
+*.h264
 *.yuv
 *.y4m
 *.m4a
