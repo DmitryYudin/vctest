@@ -531,12 +531,18 @@ encode_single_file()
 	codec_cmdSrc $codecId "$src"; encCmdSrc=$REPLY
 	codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
 
+	# temporary hack, for backward compatibility (remove later)
+	[ $codecId == h265demo ] && encCmdArgs="-c h265demo.cfg $encCmdArgs"
+
 	local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
 	echo "$cmd" > cmd # memorize
 
 	local stdoutLog=stdout.log
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
+
+	# temporary hack, for backward compatibility (remove later)
+	[ $codecId == h265demo ] && echo "" > h265demo.cfg
 
 	# Make estimates only if one instance of the encoder is running at a time
 	local estimate_execution_time=false

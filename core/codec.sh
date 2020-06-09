@@ -102,7 +102,7 @@ codec_cmdDst()
 codec_verify()
 {
 	local CODECS="$*" codecId= cmd= removeList=
-	local dirOut=$(ospath $(mktemp -d))
+	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
 
@@ -115,6 +115,11 @@ codec_verify()
 		fi
 
 		local cmd=$encoderExe
+		# temporary hack, for backward compatibility (remove later)
+		if [ $codecId == h265demo ]; then
+			echo "" > $dirOut/h265demo.cfg
+			cmd="$cmd -c $(ospath "$dirOut/h265demo.cfg")"
+		fi
 		codec_cmdArgs $codecId --res 160x96 --fps 30; cmd="$cmd $REPLY"
 		codec_cmdSrc $codecId "$0"; cmd="$cmd $REPLY"
 		codec_cmdDst $codecId "$dirOut/out.tmp"; cmd="$cmd $REPLY"
@@ -329,8 +334,8 @@ cmd_h265demo()
 			   --fps) 		fps=$2;;
 			   --preset) 	preset=$2;; # 0-7 or 1-7
 #			   --preset)	args="$args -u $2";; # usage: veryslow(quality), slower, slow, medium(balanced), fast, faster, veryfast(speed)
-			   --qp)     	args="$args -rc 2 -qp $2";;
-			   --bitrate)   args="$args -rc 0 -br $2";;
+			   --qp)     	args="$args -rc 2 -qp $2 -br 2000";;
+			   --bitrate)   args="$args -rc 0 -qp 37 -br $2";;
 			   --threads)   threads=$2;;
 			*) error_exit "unrecognized option '$1'"
 		esac
@@ -344,59 +349,38 @@ cmd_h265demo()
 #	args="$args -fr $(( inputFPS * 1000))"
 	args="$args -WppThreadNum $threads"
 	args="$args -FrmThreadNum 1"  # fixed
-	local cfg=$(cat <<-END_OF_CFG	
-		###########################################################################################
-		# Encoder Open Param
-		###########################################################################################
-		InitQP = 37
-		ChannelID = 0
-		SourceWidth  = $width
-		SourceHeight = $height
-		ColorSpace  = 0         # 0: YUV420; 1; YUVJ420  
-		Profile = 0             # 0: MAIN
-		IntraPeriod = 1000		#
-		FixedIntraPeriod = 0    # {0,1}
-		Bframes = 0             #
-		BframeRef = 1
 
-		# RCMode = 0			# 0: ABR;  1: CRF 2:CQP (set from command line)
+#	args="$args -qp 37"  			# InitQP
+	args="$args -channel 0"  		# ChannelID
+	args="$args -profile 0"  		# Profile
+	args="$args -keyInt 1000"		# IntraPeriod
+	args="$args -fixed_keyInt 0"	# FixedIntraPeriod = 0,1
+	args="$args -bframes 0"			# Bframes
+	args="$args -bframeRef 1"		# BframeRef
+	args="$args -fps_num $fps"		# FrameRateNum
+	args="$args -fps_den 1"			# FrameRateDen
+	args="$args -vfrinput 0"		# VfrInput
+	args="$args -timebase_num 1"	# TimeBaseNum
+	args="$args -timebase_den 25"	# TimeBaseDen
+	args="$args -pass 0"			# Pass
+	args="$args -crf 23"			# Crf
+	args="$args -BitRatePAR 1"		# BitRatePAR
+	args="$args -ParCovStrength 0"	# BitrateParCovStrength
+	args="$args -adap_i 0"			# Adaptive_IFrame
+	args="$args -LookAheadThreads 1" # LookAheadThreads
+	args="$args -TotalDelayTime 0"	# EtoEDelayTime
+	args="$args -delay 0"			# DelayNum
+	args="$args -preset $preset"	# Preset
+	args="$args -tune 0"			# Tune
+	args="$args -debug_level 1"		# DebugLevel
+	args="$args -pvc_level 0"		# PvcLevel
+	args="$args -pvc_mode 0"		# PvcMode
+	args="$args -pvc_strenght 0"	# PvcStrenght
+	args="$args -psnr 0"			# PSNREnable
+	args="$args -frames 9999"		# FramesToBeEncoded
+	args="$args -fixsendyuv 0"		# FixTimeSendYUV
 
-		BitRate = 2000
-		FrameRateNum = $fps
-		FrameRateDen = 1
-		VfrInput = 0
-		TimeBaseNum = 1
-		TimeBaseDen = 25
-		Pass = 0
-		Crf = 23
-		BitRatePAR = 1
-		BitrateParCovStrength = 0
-		Adaptive_IFrame = 0
-		LookAheadThreads = 1
-		EtoEDelayTime = 0
-		DelayNum = 0
-		Preset = $preset
-		Tune = 0
-		DebugLevel = 1
-		PvcLevel = 0
-		PvcMode = 0
-		PvcStrenght = 0
-		PSNREnable = 1
-
-		FramesToBeEncoded = 99999  # Number of frames to be coded
-		FixTimeSendYUV = 0 
-		#ReconFile = rec.yuv		
-		#ReconEnable = 1
-	END_OF_CFG
-	)
-	local hash=$(echo "$cfg" | md5sum | base64)
-	local _dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
-	local pathCfg="$_dirScript/persistent/h265demo-$hash.cfg"
-	if [ ! -f "$pathCfg" ]; then
-		mkdir -p "$(dirname "$pathCfg")"
-		echo "$cfg" > "$pathCfg"
-	fi
-	REPLY="-c $(ospath "$pathCfg") $args"
+	REPLY=$args
 }
 
 exe_h264demo() { REPLY=$HW264_Encoder_DemoExe; }
