@@ -4,8 +4,16 @@
 #
 set -eu -o pipefail
 
+ENABLE_NAMED_PIPE=1
+
 entrypoint()
 {
+	local BUSYBOX=$(cat --help 2>&1 | head -1 | grep BusyBox) || true
+	[ -n "$BUSYBOX" ]             && ENABLE_NAMED_PIPE=0 # not supported
+	[ -n "${KSH_VERSION:-}" ]     && ENABLE_NAMED_PIPE=0 # not supported (Android shell)
+	[ -n "${WSL_DISTRO_NAME:-}" ] && ENABLE_NAMED_PIPE=0 # broken
+	readonly ENABLE_NAMED_PIPE
+
 if [ 1 == 1 ]; then
 	jobsRunTasks "$@"
 else
@@ -33,8 +41,11 @@ jobsGetStatus()
 	return $(( __jobsInterruptCnt + __jobsErrorCnt ))
 }
 
+# Ping self to report execution progress till the statusPIPE opened
 jobsStartPing()
 {
+	[ $ENABLE_NAMED_PIPE != 1 ] && return 1
+
 	local period=$1
 	{
 		trap 'return 0' INT
@@ -115,6 +126,8 @@ executeSingleTask()
 # variable.
 jobsStartWorker()
 {
+	[ $ENABLE_NAMED_PIPE != 1 ] && return 1
+
 	local -
 	set -eu
 
@@ -219,8 +232,13 @@ jobsReportProgress()
 	[ $__jobsRunning -ge 100 ] && runWidth=3
 
 	local str
-	printf -v str "$timestamp %s[$symDn%4s/%4s][$symUp%${runWidth}s]%4s|%s" \
-		"$status" $__jobsDone "$tot" $__jobsRunning "$label" "$__jobsDisplay"
+	if [ $ENABLE_NAMED_PIPE == 1 ]; then
+		printf -v str "$timestamp %s[%4s/%4s][#%${runWidth}s]%4s|%s" \
+			"$status" $__jobsDone "$tot" $__jobsRunning "$label" "$__jobsDisplay"
+	else
+		printf -v str "$timestamp %s[%4s/%4s]%s" \
+			"$status" $__jobsDone "$tot" "$__jobsDisplay"
+	fi
 
 	if [ ${COLUMNS:-0} -gt 4 -a ${#str} -gt ${COLUMNS:-0} ]; then
 		str=${str:0:$(( COLUMNS - 5 ))}...
@@ -327,7 +345,55 @@ jobsRunTasks()
 
 	mkdir -p "$tempPath"
 	tempPath="$(cd "$tempPath" >/dev/null; pwd)"
+	__jobsRawIdx=0
+	__jobsRunning=0
+	__jobsLogLevel=1
+	__jobsStderrToStdout=${1:-0}
+	__jobsErrorCnt=0
+	__jobsInterruptCnt=0
+	__jobsTermReasonInt=0
+	__jobsNoMoreTasks=0
+	__jobsDone=0
+	__jobsDoneMax=0
+	__jobsStartSec=$SECONDS
+	__jobsDisplay=
+	while readNewTask "$delim"; do
+		[ -z "$REPLY" ] && break
+		__jobsDoneMax=$(( __jobsDoneMax + 1 ))
+	done <"$taskTxt"
 
+	#
+	# Single-threaded
+	#
+	if [ $ENABLE_NAMED_PIPE != 1 ]; then
+		while readNewTask "$delim"; do
+			[ -z "$REPLY" ] && break
+			local id=${REPLY%$ARG_DELIM*}
+			local cmd=${REPLY#*$ARG_DELIM}
+			[ -n "$id" ] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
+
+			__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
+			__jobsRunning=1
+			jobsReportProgress
+
+			if ! executeSingleTask "$id" "$cmd" "$userText" "$userFlags"; then
+				__jobsDone=$(( __jobsDone + 1 ))
+				__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
+				jobsReportTaskFail "$id" 1 "$cmd" >&2
+				break;
+			fi
+			__jobsDone=$(( __jobsDone + 1 ))
+		done <"$taskTxt"
+		__jobsNoMoreTasks=1
+		__jobsRunning=0
+		jobsReportProgress
+		echo ""
+		return $__jobsErrorCnt
+	fi
+
+	#
+	# Multi-threaded
+	#
 	jobsOnINT() {
 		# most likely stderr is redirected to /dev/null at this moment
 		[ $__jobsInterruptCnt == 0 -a $__jobsErrorCnt == 0 ] && __jobsTermReasonInt=1
@@ -365,24 +431,6 @@ jobsRunTasks()
 
 		{ jobsReportProgress; echo ""; }
 	}
-	__jobsRawIdx=0
-	__jobsRunning=0
-	__jobsLogLevel=1
-	__jobsStderrToStdout=${1:-0}
-	__jobsErrorCnt=0
-	__jobsInterruptCnt=0
-	__jobsTermReasonInt=0
-	__jobsNoMoreTasks=0
-	__jobsDone=0
-	__jobsDoneMax=0
-	__jobsStartSec=$SECONDS
-	__jobsProgressCnt=0
-	__jobsDisplay=
-
-	while readNewTask "$delim"; do
-		[ -z "$REPLY" ] && break
-		__jobsDoneMax=$(( __jobsDoneMax + 1 ))
-	done <"$taskTxt"
 
 	readonly __jobsStatusPipe="$tempPath/pipe_status"
 	readonly __jobsWorkPipe="$tempPath/pipe_work"
