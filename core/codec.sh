@@ -47,7 +47,7 @@ codec_exe()
 	if [ -n "$cachedVal" ]; then
 		encoderExe=$cachedVal
 	else
-		exe_${codecId} && encoderExe=$REPLY
+		exe_${codecId}; encoderExe=$REPLY
 		[ -f "$encoderExe" ] || error_exit "encoder does not exist '$encoderExe'"
 		encoderExe=$(realpath "$encoderExe")
 		eval "CACHE_path_${codecId}=$encoderExe"
@@ -64,7 +64,7 @@ codec_hash()
 		hash=$cachedVal
 	else
 		local encoderExe
-		codec_exe $codecId && encoderExe=$REPLY
+		codec_exe $codecId; encoderExe=$REPLY
 		hash=$(md5sum ${encoderExe//\\//})
 		hash=${hash% *}
 		hash=${codecId}_${hash::8}
@@ -107,7 +107,7 @@ codec_verify()
 	trap 'rm -rf -- "$dirOut"' EXIT
 
 	for codecId in $CODECS; do
-		exe_${codecId} && encoderExe=$REPLY
+		exe_${codecId}; encoderExe=$REPLY
 		if ! [ -f "$encoderExe" ]; then
 			echo "warning: can't find executable. Remove '$codecId' from a list."
 			removeList="$removeList $codecId"
@@ -115,9 +115,9 @@ codec_verify()
 		fi
 
 		local cmd=$encoderExe
-		codec_cmdArgs $codecId --res 160x96 --fps 30 && cmd="$cmd $REPLY"
-		codec_cmdSrc $codecId "$0" && cmd="$cmd $REPLY"
-		codec_cmdDst $codecId "$dirOut/out.tmp" && cmd="$cmd $REPLY"
+		codec_cmdArgs $codecId --res 160x96 --fps 30; cmd="$cmd $REPLY"
+		codec_cmdSrc $codecId "$0"; cmd="$cmd $REPLY"
+		codec_cmdDst $codecId "$dirOut/out.tmp"; cmd="$cmd $REPLY"
 
 		if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
 			echo "warning: encoding error. Remove '$codecId' from a list." >&2;
@@ -308,12 +308,12 @@ cmd_intel()
 exe_intel_sw() { REPLY=$intelEncoderExe; }
 src_intel_sw() { REPLY="-i $1"; }
 dst_intel_sw() { REPLY="-o $1"; }
-cmd_intel_sw() { cmd_intel "$@" && REPLY="$REPLY -sw"; }
+cmd_intel_sw() { cmd_intel "$@"; REPLY="$REPLY -sw"; }
 
 exe_intel_hw() { REPLY=$intelEncoderExe; }
 src_intel_hw() { REPLY="-i $1"; }
 dst_intel_hw() { REPLY="-o $1"; }
-cmd_intel_hw() { cmd_intel "$@" && REPLY="$REPLY -hw"; }
+cmd_intel_hw() { cmd_intel "$@"; REPLY="$REPLY -hw"; }
 
 exe_h265demo() { REPLY=$h265EncDemoExe; }
 src_h265demo() { REPLY="-i $1"; }

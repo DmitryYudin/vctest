@@ -96,10 +96,10 @@ entrypoint()
 	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
 
 	# Remove non-existing and set abs-path
-	vectors_verify $VECTORS && VECTORS=$REPLY
+	vectors_verify $VECTORS; VECTORS=$REPLY
 
 	# Remove codecs we can't run
-	codec_verify $CODECS && CODECS=$REPLY
+	codec_verify $CODECS; CODECS=$REPLY
 
 	local startSec=$SECONDS
 
@@ -114,12 +114,12 @@ entrypoint()
 	local encodeList= decodeList= parseList= reportList=
 	while read info; do
 		local encCmdArgs
-		dict_getValueEOL "$info" encCmdArgs && encCmdArgs=$REPLY
+		dict_getValueEOL "$info" encCmdArgs; encCmdArgs=$REPLY
 		info=${info%%encCmdArgs:*} # do not propogate cmdArgs
 
 		local encExeHash encCmdHash
-		dict_getValue "$info" encExeHash && encExeHash=$REPLY
-		dict_getValue "$info" encCmdHash && encCmdHash=$REPLY
+		dict_getValue "$info" encExeHash; encExeHash=$REPLY
+		dict_getValue "$info" encCmdHash; encCmdHash=$REPLY
 		local outputDirRel="$encExeHash/$encCmdHash"
 		local outputDir="$DIR_OUT/$outputDirRel"
 
@@ -135,13 +135,13 @@ entrypoint()
 			mkdir -p "$outputDir"
 
 			local codecId= src= dst= encCmdSrc= encCmdDst=
-			dict_getValue "$info" codecId && codecId=$REPLY
-			dict_getValue "$info" encExe && encExe=$REPLY
-			dict_getValue "$info" src && src=$REPLY
-			dict_getValue "$info" dst && dst=$REPLY
+			dict_getValue "$info" codecId; codecId=$REPLY
+			dict_getValue "$info" encExe; encExe=$REPLY
+			dict_getValue "$info" src; src=$REPLY
+			dict_getValue "$info" dst; dst=$REPLY
 
-			codec_cmdSrc $codecId "$src" && encCmdSrc=$REPLY
-			codec_cmdDst $codecId "$dst" && encCmdDst=$REPLY
+			codec_cmdSrc $codecId "$src"; encCmdSrc=$REPLY
+			codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
 
 			# readonly kw-file will be used across all processing stages
 			echo "$info" > $outputDir/info.kw
@@ -166,7 +166,7 @@ entrypoint()
 	progress_end
 
 	local self
-	relative_path "$0" && self=$REPLY # just to make output look nicely
+	relative_path "$0"; self=$REPLY # just to make output look nicely
 
 	#
 	# Encoding
@@ -268,11 +268,11 @@ prepare_optionsFile()
 		else
 			bitrate=$prm
 		fi
-		[ $preset == '-' ] && codec_default_preset "$codecId" && preset=$REPLY
+		[ $preset == '-' ] && { codec_default_preset "$codecId"; preset=$REPLY; }
 		local srcRes= srcFps= srcNumFr=
-		detect_resolution_string "$src" && srcRes=$REPLY
-		detect_framerate_string "$src" && srcFps=$REPLY
-		detect_frame_num "$src" "$srcRes" && srcNumFr=$REPLY
+		detect_resolution_string "$src"; srcRes=$REPLY
+		detect_framerate_string "$src"; srcFps=$REPLY
+		detect_frame_num "$src" "$srcRes"; srcNumFr=$REPLY
 
 		local args="--res "$srcRes" --fps $srcFps --threads $THREADS"
 		[ $bitrate == '-' ] || args="$args --bitrate $bitrate"
@@ -280,9 +280,9 @@ prepare_optionsFile()
 		[ $preset == '-' ] || args="$args --preset $preset"
 
 		local encExe= encExeHash= encCmdArgs= encCmdHash=
-		codec_exe $codecId && encExe=$REPLY
-		codec_hash $codecId && encExeHash=$REPLY
-		codec_cmdArgs $codecId $args && encCmdArgs=$REPLY
+		codec_exe $codecId; encExe=$REPLY
+		codec_hash $codecId; encExeHash=$REPLY
+		codec_cmdArgs $codecId $args; encCmdArgs=$REPLY
 
 		local SRC=${src//\\/}; SRC=${SRC##*[/\\]} # basename only
 		local ext=h265; [ $codecId == h264demo ] && ext=h264
@@ -300,8 +300,8 @@ prepare_optionsFile()
 	local hashTmpFile=$(mktemp)
 	while read data; do
 		local encCmdArgs SRC
-		dict_getValueEOL "$data" encCmdArgs && encCmdArgs=$REPLY
-		dict_getValue "$data" SRC && SRC=$REPLY
+		dict_getValueEOL "$data" encCmdArgs; encCmdArgs=$REPLY
+		dict_getValue "$data" SRC; SRC=$REPLY
 		local args=${encCmdArgs// /}   # remove all whitespaces
 		echo "$SRC $args"
 	done < $infoTmpFile | python "$(ospath "$dirScript")/md5sum.py" | tr -d $'\r' > $hashTmpFile
@@ -359,7 +359,7 @@ progress_begin()
 	rm -f $TESTPLAN
 
 	for str; do
-		list_size "$1" && PROGRESS_CNT_TOT=$(( PROGRESS_CNT_TOT * REPLY))
+		list_size "$1"; PROGRESS_CNT_TOT=$(( PROGRESS_CNT_TOT * REPLY))
 		shift
 	done
 	print_console "$name\n"
@@ -387,17 +387,17 @@ progress_next()
 	PROGRESS_CNT=$(( PROGRESS_CNT + 1 ))
 
 	local codecId= srcRes= srcFps= srcNumFr= QP= BR= PRESET= TH= SRC= HASH= ENC=
-	dict_getValue "$info" codecId  && codecId=$REPLY
-	dict_getValue "$info" srcRes   && srcRes=$REPLY
-	dict_getValue "$info" srcFps   && srcFps=$REPLY
-	dict_getValue "$info" srcNumFr && srcNumFr=$REPLY
-	dict_getValue "$info" QP       && QP=$REPLY
-	dict_getValue "$info" BR       && BR=$REPLY
-	dict_getValue "$info" PRESET   && PRESET=$REPLY
-	dict_getValue "$info" TH       && TH=$REPLY
-	dict_getValue "$info" SRC      && SRC=$REPLY
-	dict_getValue "$info" encCmdHash && HASH=$REPLY && HASH=${HASH::16}
-	dict_getValue "$info" encExeHash && ENC=$REPLY  && ENC=${ENC##*_}
+	dict_getValue "$info" codecId  ; codecId=$REPLY
+	dict_getValue "$info" srcRes   ; srcRes=$REPLY
+	dict_getValue "$info" srcFps   ; srcFps=$REPLY
+	dict_getValue "$info" srcNumFr ; srcNumFr=$REPLY
+	dict_getValue "$info" QP       ; QP=$REPLY
+	dict_getValue "$info" BR       ; BR=$REPLY
+	dict_getValue "$info" PRESET   ; PRESET=$REPLY
+	dict_getValue "$info" TH       ; TH=$REPLY
+	dict_getValue "$info" SRC      ; SRC=$REPLY
+	dict_getValue "$info" encCmdHash ; HASH=$REPLY ; HASH=${HASH::16}
+	dict_getValue "$info" encExeHash ; ENC=$REPLY  ; ENC=${ENC##*_}
 
 	local str=
 	printf 	-v str "%4s %-8s %11s %5s %2s %6s" 	"$PROGRESS_CNT" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
@@ -466,29 +466,29 @@ output_report()
 	local extFPS= intFPS= cpu= kbps= numI= avgI= avgP= peak= gPSNR= psnrI= psnrP= gSSIM=
 	local codecId= srcRes= srcFps= numFr= QP= BR= PRESET= TH= SRC= HASH= ENC=
 
-	dict_getValue "$dict" extFPS  && extFPS=$REPLY
-	dict_getValue "$dict" intFPS  && intFPS=$REPLY
-	dict_getValue "$dict" cpu     && cpu=$REPLY
-	dict_getValue "$dict" kbps    && kbps=$REPLY
-	dict_getValue "$dict" numI    && numI=$REPLY
-	dict_getValue "$dict" avgI    && avgI=$REPLY
-	dict_getValue "$dict" avgP    && avgP=$REPLY
-	dict_getValue "$dict" peak    && peak=$REPLY
-	dict_getValue "$dict" gPSNR   && gPSNR=$REPLY
-	dict_getValue "$dict" psnrI   && psnrI=$REPLY
-	dict_getValue "$dict" psnrP   && psnrP=$REPLY
-	dict_getValue "$dict" gSSIM   && gSSIM=$REPLY
-	dict_getValue "$dict" codecId  && codecId=$REPLY
-	dict_getValue "$dict" srcRes   && srcRes=$REPLY
-	dict_getValue "$dict" srcFps   && srcFps=$REPLY
-	dict_getValue "$dict" srcNumFr && srcNumFr=$REPLY
-	dict_getValue "$dict" QP       && QP=$REPLY
-	dict_getValue "$dict" BR       && BR=$REPLY
-	dict_getValue "$dict" PRESET   && PRESET=$REPLY
-	dict_getValue "$dict" TH       && TH=$REPLY
-	dict_getValue "$dict" SRC      && SRC=$REPLY
-	dict_getValue "$dict" encCmdHash && HASH=$REPLY && HASH=${HASH::16}
-	dict_getValue "$dict" encExeHash && ENC=$REPLY  && ENC=${ENC##*_}
+	dict_getValue "$dict" extFPS  ; extFPS=$REPLY
+	dict_getValue "$dict" intFPS  ; intFPS=$REPLY
+	dict_getValue "$dict" cpu     ; cpu=$REPLY
+	dict_getValue "$dict" kbps    ; kbps=$REPLY
+	dict_getValue "$dict" numI    ; numI=$REPLY
+	dict_getValue "$dict" avgI    ; avgI=$REPLY
+	dict_getValue "$dict" avgP    ; avgP=$REPLY
+	dict_getValue "$dict" peak    ; peak=$REPLY
+	dict_getValue "$dict" gPSNR   ; gPSNR=$REPLY
+	dict_getValue "$dict" psnrI   ; psnrI=$REPLY
+	dict_getValue "$dict" psnrP   ; psnrP=$REPLY
+	dict_getValue "$dict" gSSIM   ; gSSIM=$REPLY
+	dict_getValue "$dict" codecId ; codecId=$REPLY
+	dict_getValue "$dict" srcRes  ; srcRes=$REPLY
+	dict_getValue "$dict" srcFps  ; srcFps=$REPLY
+	dict_getValue "$dict" srcNumFr; srcNumFr=$REPLY
+	dict_getValue "$dict" QP      ; QP=$REPLY
+	dict_getValue "$dict" BR      ; BR=$REPLY
+	dict_getValue "$dict" PRESET  ; PRESET=$REPLY
+	dict_getValue "$dict" TH      ; TH=$REPLY
+	dict_getValue "$dict" SRC     ; SRC=$REPLY
+	dict_getValue "$dict" encCmdHash; HASH=$REPLY; HASH=${HASH::16}
+	dict_getValue "$dict" encExeHash; ENC=$REPLY ; ENC=${ENC##*_}
 
 	local str=
 	printf 	-v str    "%6s %8.2f %5s %5.0f"            "$extFPS" "$intFPS" "$cpu" "$kbps"
@@ -521,10 +521,10 @@ encode_single_file()
 
 	local info= codecId= src= dst= srcNumFr=
 	info=$(cat info.kw)
-	dict_getValue "$info" codecId && codecId=$REPLY
-	dict_getValue "$info" srcNumFr && srcNumFr=$REPLY
-	dict_getValue "$info" src && src=$REPLY
-	dict_getValue "$info" dst && dst=$REPLY
+	dict_getValue "$info" codecId; codecId=$REPLY
+	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
+	dict_getValue "$info" src; src=$REPLY
+	dict_getValue "$info" dst; dst=$REPLY
 
 	local cmd=
 	cmd=$(cat cmd)
@@ -581,8 +581,8 @@ decode_single_file()
 
 	local info= src= dst=
 	info=$(cat info.kw)
-	dict_getValue "$info" src && src=$(ospath "$REPLY")
-	dict_getValue "$info" dst && dst=$REPLY
+	dict_getValue "$info" src; src=$(ospath "$REPLY")
+	dict_getValue "$info" dst; dst=$REPLY
 
 	local recon=$(basename "$dst").yuv
 	local kbpsLog=kbps.log
@@ -593,9 +593,9 @@ decode_single_file()
 	local summaryLog=summary.log
 
 	local srcRes= srcFps= srcNumFr=
-	dict_getValue "$info" srcRes && srcRes=$REPLY
-	dict_getValue "$info" srcFps && srcFps=$REPLY
-	dict_getValue "$info" srcNumFr && srcNumFr=$REPLY
+	dict_getValue "$info" srcRes; srcRes=$REPLY
+	dict_getValue "$info" srcFps; srcFps=$REPLY
+	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
 	$ffmpegExe -y -loglevel error -i "$dst" "$recon"
 	$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $infoLog
@@ -651,7 +651,7 @@ parse_single_file()
 
 	local info= codecId=
 	info=$(cat info.kw)
-	dict_getValue "$info" codecId && codecId=$REPLY
+	dict_getValue "$info" codecId; codecId=$REPLY
 
 	local stdoutLog=stdout.log
 	local kbpsLog=kbps.log
