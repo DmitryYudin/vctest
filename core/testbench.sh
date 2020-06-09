@@ -304,7 +304,7 @@ prepare_optionsFile()
 		dict_getValue "$data" SRC && SRC=$REPLY
 		local args=${encCmdArgs// /}   # remove all whitespaces
 		echo "$SRC $args"
-	done < $infoTmpFile | python "$(winpath "$dirScript")/md5sum.py" | tr -d $'\r' > $hashTmpFile
+	done < $infoTmpFile | python "$(ospath "$dirScript")/md5sum.py" | tr -d $'\r' > $hashTmpFile
 
 	local data encCmdHash
 	while IFS= read -u3 -r encCmdHash && IFS= read -u4 -r data; do 
@@ -581,7 +581,7 @@ decode_single_file()
 
 	local info= src= dst=
 	info=$(cat info.kw)
-	dict_getValue "$info" src && src=$(winpath "$REPLY")
+	dict_getValue "$info" src && src=$(ospath "$REPLY")
 	dict_getValue "$info" dst && dst=$REPLY
 
 	local recon=$(basename "$dst").yuv

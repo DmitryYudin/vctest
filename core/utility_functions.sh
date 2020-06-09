@@ -8,17 +8,16 @@ error_exit()
 	exit 1
 }
 
-# The native windows applicationss do not recognize path name in a Cygwin (/cygdrive/c/...)
-# or Msys (/c/...) style. Cygwin/Msys tools accept windows path as well, but under WSL
-# buldin utils does not accept windows path.
-# So, we keep to variants
-#    winpath   -> C:/...
-#    unixpath  -> /cygdrive/c/..., /c/... or /mnt/c/... as defined by the environment
+# Always use '/' as separator
 #
-winpath() # ~= cygpath -w
+# Change nothing for non-Windows host. On Windows, replace Cygwin '/cygdrive/c'
+# or Msys/Busybox '/c' prefix with the drive letter 'c:' to enable native apps
+# to recognize the path name.
+# Note, WSL buildins do not accept Windows path name in a form of 'C:/abcd'.
+ospath() # ~= cygpath -m
 {
 	local path=$1; shift
-	[ -n "${WSL_DISTRO_NAME:-}" ] && command wslpath -w "$path" && return
+	[ -n "${WSL_DISTRO_NAME:-}" ] && command wslpath -m "$path" && return
 	case ${OS:-} in 
 		*_NT) : ;;
 		*) echo "$path" && return;;

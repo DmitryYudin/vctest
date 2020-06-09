@@ -91,7 +91,7 @@ codec_cmdSrc()
 {
 	local codecId=$1; shift
 	local src=$1; shift
-	src_${codecId} "$(winpath $src)"
+	src_${codecId} "$(ospath $src)"
 }
 codec_cmdDst()
 {
@@ -102,7 +102,7 @@ codec_cmdDst()
 codec_verify()
 {
 	local CODECS="$*" codecId= cmd= removeList=
-	local dirOut=$(winpath $(mktemp -d))
+	local dirOut=$(ospath $(mktemp -d))
 
 	trap 'rm -rf -- "$dirOut"' EXIT
 
@@ -396,7 +396,7 @@ cmd_h265demo()
 		mkdir -p "$(dirname "$pathCfg")"
 		echo "$cfg" > "$pathCfg"
 	fi
-	REPLY="-c $(winpath "$pathCfg") $args"
+	REPLY="-c $(ospath "$pathCfg") $args"
 }
 
 exe_h264demo() { REPLY=$HW264_Encoder_DemoExe; }
