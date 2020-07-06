@@ -11,15 +11,15 @@
 #	codec_cmdSrc(id, src)     - set input file name
 #	codec_cmdDst(id, src)     - set output file name
 #
-if [ -z "${ashevcEncoderExe:-}" ]; then
-readonly ashevcEncoderExe=$dirScript/../'bin/ashevc/cli_ashevc.exe'
-readonly x265EncoderExe=$dirScript/../'bin/x265/x265.exe'
-readonly kvazaarEncoderExe=$dirScript/../'bin/kvazaar/kvazaar.exe'
-readonly kingsoftEncoderExe=$dirScript/../'bin/kingsoft/AppEncoder_x64.exe'
-readonly intelEncoderExe=$dirScript/../'bin/intel/sample_encode.exe' # can't run HW.
-readonly h265EncDemoExe=$dirScript/../'bin/hw265/h265EncDemo.exe'
-readonly HW264_Encoder_DemoExe=$dirScript/../'bin/hme264/HW264_Encoder_Demo.exe'
-fi
+
+dirBinWindows="$dirScript/../bin/windows"
+windows_ashevc="$dirBinWindows/ashevc/cli_ashevc.exe"
+windows_x265="$dirBinWindows/x265/x265.exe"
+windows_kvazaar="$dirBinWindows/kvazaar/kvazaar.exe"
+windows_kingsoft="$dirBinWindows/kingsoft/AppEncoder_x64.exe"
+windows_intel="$dirBinWindows/intel/sample_encode.exe"
+windows_h265demo="$dirBinWindows/hw265/h265EncDemo.exe"
+windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
 
 codec_default_preset()
 {

@@ -313,19 +313,10 @@ start_cpu_monitor()
 	local codecId=$1; shift
 	local cpuLog=$1; shift
 
-	local encoderExe=
-	case $codecId in
-		ashevc) 	encoderExe=$ashevcEncoderExe;;
-		x265) 		encoderExe=$x265EncoderExe;;
-		kvazaar) 	encoderExe=$kvazaarEncoderExe;;
-		kingsoft) 	encoderExe=$kingsoftEncoderExe;;
-		intel*)		encoderExe=$intelEncoderExe;;
-		h265demo)	encoderExe=$h265EncDemoExe;;
-		h264demo)	encoderExe=$HW264_Encoder_DemoExe;;
-		*) echo "unknown codec($LINENO): $codecId" >&2 && return 1 ;;
-	esac
+	local encExe=
+	codec_exe $codecId; encExe=$REPLY
 
-	local name=$(basename "$encoderExe"); name=${name%.*}
+	local name=$(basename "$encExe"); name=${name%.*}
 
 	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
 	if [[ $cpu_monitor_type == windows ]]; then
