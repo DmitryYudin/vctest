@@ -1,10 +1,23 @@
 set -eu -o pipefail
 
+USE_POWERSHELL=1
 # Sometimes, power-shell does not return error status as expected,
 # but it is more NTLM proxy friendly than curl.
-. ./core/url.sh ps
-#. ./core/url.sh curl
+. ./core/url.sh $( [[ $USE_POWERSHELL == 1 ]] && echo ps || echo curl )
 
+notify() {
+	echo ""
+	echo "You need to install Intel MediaSdk to make hardware encoder workable:"
+	echo "    https://software.intel.com/en-us/media-sdk/choose-download/client"
+	if [[ $USE_POWERSHELL == 1 ]]; then
+		echo ""
+		echo "In case of problems with downloading executable modules through the"
+		echo "corporate proxy, make sure that 'Protection Mode' is disabled in"
+		echo "Internet Explorer settings:"
+		echo "    IE -> Internet Options -> Security -> Enable Protection Mode"
+	fi
+	echo ""
+}
 #readonly KEEP_CACHE=1
 
 readonly dirBin=bin
@@ -12,22 +25,24 @@ readonly dirVec=vectors
 readonly SevenZipExe=$dirBin/7z
 readonly ffmpegExe=$dirBin/ffmpeg
 
-readonly URLS=$(cat <<EOT
-	#-ffmpeg
+readonly URLS=$(cat <<'EOT'
+	# ffmpeg
 	https://ffmpeg.zeranoe.com/builds/win64/static/ffmpeg-20200525-6268034-win64-static.zip
 
-	#-Encoders
+	# Encoders
 	https://software.intel.com/sites/default/files/managed/61/d0/MediaSamples_MSDK_2017_8.0.24.271.msi
 	https://github.com/ksvc/ks265codec/raw/master/win/AppEncoder_x64.exe
+	https://github.com/ksvc/ks265codec/raw/master/android_arm64/appencoder
 	https://github.com/ultravideo/kvazaar/releases/download/v1.3.0/Win64-Release.zip
 	https://builds.x265.eu/x265-64bit-8bit-latest.exe
-	#---ARC
+
+	# ARC
 	https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/ASHEVCEnc.dll
 	https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/VMFPlatform.dll
 	https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/cli_ashevc.exe
 	https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/ashevc_example.cfg
 
-	#-Vectors
+	# Vectors
 	http://trace.eas.asu.edu/yuv/akiyo/akiyo_qcif.7z
 	http://trace.eas.asu.edu/yuv/akiyo/akiyo_cif.7z
 	http://trace.eas.asu.edu/yuv/foreman/foreman_qcif.7z
@@ -72,14 +87,20 @@ entrypoint()
 	local dirCache=$dirVec/cache
 	local url=
 
+	notify
+
+	local oldIFS=$IFS
+	IFS=$'\n';
 	for url in $URLS; do
-		[ $url != "${url#\#-*}" ] && continue # comment
-		[ $url != "${url#\#*}" ] && echo "Skip $url" && continue
-		local name=$(basename $url)
+		IFS=$oldIFS
+		url=${url#"${url%%[! $'\t']*}"}; # leading spaces
+		case $url in '#'*) continue; esac
+
+		local name=$(basename "$url")
 		local dst="$dirCache/$name"
 
 		mkdir -p "$dirLog" "$dirCache"
-		if [ -f "$dirLog/$name.downloaded.stamp" ]; then
+		if [[ -f "$dirLog/$name.downloaded.stamp" ]]; then
 			echo "Already downloaded $url"
 		else
 			echo "Downloading $url -> $dst"			
@@ -89,7 +110,7 @@ entrypoint()
 			date "+%Y.%m.%d-%H.%M.%S" > "$dirLog/$name.downloaded.stamp"
 		fi
 
-		if [ -f "$dirLog/$name.unpacked.stamp" ]; then
+		if [[ -f "$dirLog/$name.unpacked.stamp" ]]; then
 			echo "Already unpacked $dst"
 		else
 			echo "Unpacking $dst"
@@ -101,27 +122,26 @@ entrypoint()
 # Encoder
 #
 				MediaSamples_MSDK_*)
-					echo ""
-					echo "You need to install Intel MediaSdk to make hardware encoder workable"
-					echo "https://software.intel.com/en-us/media-sdk/choose-download/client"
-					echo ""
-					mkdir -p "$dirBin/intel"
+					mkdir -p "$dirBin/windows/intel"
 					$SevenZipExe x -y "$dst" -o"$dirBin/tmp_intel" > /dev/null
-					mv -f "$dirBin/tmp_intel/File_sample_encode.exe0" "$dirBin/intel/sample_encode.exe"
+					mv -f "$dirBin/tmp_intel/File_sample_encode.exe0" "$dirBin/windows/intel/sample_encode.exe"
 					rm -rf "$dirBin/tmp_intel"
 				;;
 				AppEncoder_x64.exe)
-					mkdir -p "$dirBin/kingsoft"
-					mv -f "$dst" "$dirBin/kingsoft";;
+					mkdir -p "$dirBin/windows/kingsoft"
+					mv -f "$dst" "$dirBin/windows/kingsoft";;
+				appencoder)
+					mkdir -p "$dirBin/android/kingsoft"
+					mv -f "$dst" "$dirBin/android/kingsoft";;
 				Win64-Release.zip)
-					mkdir -p "$dirBin/kvazaar"
-					$SevenZipExe x -y "$dst" -o"$dirBin/kvazaar" > /dev/null ;;
+					mkdir -p "$dirBin/windows/kvazaar"
+					$SevenZipExe x -y "$dst" -o"$dirBin/windows/kvazaar" > /dev/null ;;
 				x265-*)
-					mkdir -p "$dirBin/x265"
-					mv -f "$dst" "$dirBin/x265/x265.exe";;
+					mkdir -p "$dirBin/windows/x265"
+					mv -f "$dst" "$dirBin/windows/x265/x265.exe";;
 				ASHEVCEnc.dll|VMFPlatform.dll|cli_ashevc.exe|ashevc_example.cfg)
-					mkdir -p "$dirBin/ashevc"
-					mv -f "$dst" "$dirBin/ashevc/";;
+					mkdir -p "$dirBin/windows/ashevc"
+					mv -f "$dst" "$dirBin/windows/ashevc/";;
 #
 # Vectors
 #
@@ -162,11 +182,14 @@ entrypoint()
 			esac
 			date "+%Y.%m.%d-%H.%M.%S" > "$dirLog/$name.unpacked.stamp"
 
-			if [ "${KEEP_CACHE:-}" != 1 ]; then
+			if [[ "${KEEP_CACHE:-}" != 1 ]]; then
 				rm -rf "$dirCache"
 			fi
 		fi
 	done
+
+	notify
+
 	echo Done
 }
 
