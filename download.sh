@@ -34,7 +34,8 @@ readonly URLS=$(cat <<'EOT'
 	https://github.com/ksvc/ks265codec/raw/master/win/AppEncoder_x64.exe
 	https://github.com/ksvc/ks265codec/raw/master/android_arm64/appencoder
 	https://github.com/ultravideo/kvazaar/releases/download/v1.3.0/Win64-Release.zip
-	https://builds.x265.eu/x265-64bit-8bit-latest.exe
+	# https://builds.x265.eu/x265-64bit-8bit-latest.exe
+	http://msystem.waw.pl/x265/x265-3.4+1-7b12030-stable_vs2019-AVX2.7z
 
 	# ARC
 	https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/ASHEVCEnc.dll
@@ -136,9 +137,13 @@ entrypoint()
 				Win64-Release.zip)
 					mkdir -p "$dirBin/windows/kvazaar"
 					$SevenZipExe x -y "$dst" -o"$dirBin/windows/kvazaar" > /dev/null ;;
-				x265-*)
+				x265-64bit*)
 					mkdir -p "$dirBin/windows/x265"
 					mv -f "$dst" "$dirBin/windows/x265/x265.exe";;
+				x265-3*)
+					mkdir -p "$dirBin/windows/x265"
+					$SevenZipExe x -y "$dst" -o"$dirBin/windows/x265" -i"!x265-8b.exe"> /dev/null
+					mv $dirBin/windows/x265/x265-8b.exe $dirBin/windows/x265/x265.exe ;;
 				ASHEVCEnc.dll|VMFPlatform.dll|cli_ashevc.exe|ashevc_example.cfg)
 					mkdir -p "$dirBin/windows/ashevc"
 					mv -f "$dst" "$dirBin/windows/ashevc/";;
