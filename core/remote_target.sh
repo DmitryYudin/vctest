@@ -8,21 +8,23 @@
 #   TARGET_getExecDir     - directory we can execute from
 #   TARGET_getDataDir     - '/sdcard' for Android
 #   TARGET_getFingerprint - device info
-#   TARGET_pull
-#   TARGET_push
-#   TARGET_pushFileOnce - 'push' without overwrite
+#   TARGET_pull           - to move folder content use 'cp src/. dst' syntax
+#   TARGET_push           -                                   ^ this guy
+#   TARGET_pushFileOnce   - 'push' without overwrite
 #
-# Currently sticked to Android only. TODO:remote ssh host
-#
-TARGET_setTarget()
+TARGET_setTarget() # <adb|ssh> [remote.local]
 {
 	local target=$1; shift
-	local prms_script=${1=}
+	local prms_script=${1:-}
 
-	ADB_SERIAL=;
+	ADB_SERIAL=; SSH_IP=; SSH_OPTIONS="-P 22"
 	if [[ -n "$prms_script" ]]; then
 		. "$prms_script"
 		ADB_SERIAL=${serial:-}
+		# Do not use '-batch' option here since we have to change remote
+		# fingerprint with OS reinstall. This case we just accept new suggested id.
+		SSH_IP=${ip:-}
+		SSH_OPTIONS="$SSH_OPTIONS ${user:+ -l $user} ${passw:+ -pw $passw}"
 	fi
 
 	if [[ $target == adb ]]; then
@@ -53,6 +55,23 @@ TARGET_setTarget()
 		TARGET_push()           { _adb_push "$@"; }
 		TARGET_pushFileOnce()   { _adb_pushFileOnce "$@"; }
 		TARGET_exec()           { _adb_exec "$@"; }
+	elif [[ $target == ssh ]]; then
+		[[ -z "${SSH_IP:-}" ]] && echo "error: IP is empty, can't ssh" >&2 && return 1
+		export SSH_IP
+		export SSH_OPTIONS
+		TARGET_getExecDir()     { _ssh_getExecDir "$@"; }
+		TARGET_getDataDir()     { _ssh_getDataDir "$@"; }
+		TARGET_getFingerprint() { _ssh_getFingerprint "$@"; }
+		TARGET_pull()           { _ssh_pull "$@"; }
+		TARGET_push()           { _ssh_push "$@"; }
+		TARGET_pushFileOnce()   { _ssh_pushFileOnce "$@"; }
+		TARGET_exec()           { _ssh_exec "$@"; }
+		pscp()  { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" command pscp "$@"; }
+		plink() { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" command plink "$@"; }
+		ssh()   { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" command ssh "$@"; }
+		export -f pscp
+		export -f plink
+		export -f ssh
 	else
 		echo "error: unknown remote target '$target'" >&2
 		return 1
@@ -128,4 +147,75 @@ _adb_pushFileOnce()
 _adb_exec()
 {
 	adb shell -n "set -e; $@"
+}
+
+#  _____ _____ _____ 
+# |   __|   __|  |  |
+# |__   |__   |     |
+# |_____|_____|__|__|
+#
+_ssh_getExecDir()
+{
+#	REPLY=/home/$SSH_USER
+	REPLY=$(_ssh_exec "pwd")
+	REPLY=${REPLY%%$'\r'}
+}
+_ssh_getDataDir()
+{
+	_ssh_getExecDir
+}
+_ssh_getFingerprint()
+{
+	REPLY=TODO
+}
+#
+# Copy the content of 'src' folder into 'dst' folder as 'copy src proto:dst'
+#
+# Assume 'dst' exists otherwise pscp does not work.
+#
+#   src  |          dst content
+# ending | cp          adb          pscp
+# -------+--------------------------------
+# "/"    | dst/src/*   dst/src/*    dst/*
+# "/."   | dst/*       dst/*        -        <-- recognize this case and
+# "/*"   | -           -            dst/*  <---/ replace '/.' with '/*' for pscp
+#
+# ^ The is also applicible for pulling data from a remote machine to a host system
+#
+_ssh_pull()
+{
+	local remoteSrc=${1//\\//}; shift
+	local localDst=$1; shift
+	remoteSrc=${remoteSrc/%\/./\/*}
+	pscp $SSH_OPTIONS -r "$SSH_IP:$remoteSrc" "$localDst"
+}
+_ssh_push()
+{
+	local localSrc=${1//\\//}; shift
+	local remoteDst=$1; shift
+	localSrc=${localSrc/%\/./\/*}
+	pscp $SSH_OPTIONS -r "$localSrc" "$SSH_IP:$remoteDst" 
+}
+_ssh_pushFileOnce()
+{
+	local localSrc=$1; shift
+	local remoteDst=$1; shift # maybe directory
+	
+	REPLY=$(TARGET_exec "
+		filepath=$remoteDst; [[ -d $remoteDst ]] && filepath=$remoteDst/$(basename $localSrc)
+		[[ ! -e \$filepath ]] && rm -f \$filepath.stamp 2>/dev/null || true
+		[[ ! -e \$filepath.stamp ]] && exit 0
+		echo ok
+	")
+	[[ "$REPLY" == ok ]] && return
+
+	_ssh_push "$localSrc" "$remoteDst"
+	_ssh_exec "
+		filepath=$remoteDst; [[ -d $remoteDst ]] && filepath=$remoteDst/$(basename $localSrc)
+		date > \$filepath.stamp
+	"
+}
+_ssh_exec()
+{
+   	plink -batch $SSH_OPTIONS $SSH_IP "set -e; $@"
 }
