@@ -54,6 +54,7 @@ usage()
 	                     available in parallel execution mode.
 	       --hide        Do not print legend and header.
 	       --adb         Run Android@ARM using ADB. | Credentials are read from 'remote.local' file.
+	       --ssh         Run Linux@ARM using SSH.   |         (see example for details)
 	EOF
 }
 
@@ -76,6 +77,7 @@ entrypoint()
 			-j|--ncpu)		cmd_ncpu=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; remote=true; nargs=1;;
+			   --ssh)       target=ssh; remote=true; nargs=1;;
 			   --)			cmd_endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
@@ -260,6 +262,7 @@ vectors_verify()
 		local remoteDirVec
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
 		echo "Push vectors to remote machine $remoteDirVec ..."
+		TARGET_exec "mkdir -p $remoteDirVec"
 		for vec in $VECTORS_ABS; do
 			TARGET_pushFileOnce "$(ospath $vec)" $remoteDirVec/${vec##*/}
 		done

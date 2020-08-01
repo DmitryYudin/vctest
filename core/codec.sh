@@ -25,6 +25,9 @@ dirBinAndroid="$dirScript/../bin/android"
 android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
 android_h265demo="$dirBinAndroid/hw265/h265demo"
 
+dirBinLinuxARM="$dirScript/../bin/linux-arm"
+linux_arm_h265demo="$dirBinLinuxARM/hw265/h265demo"
+
 codec_default_preset()
 {
 	local codecId=$1; shift
@@ -154,6 +157,7 @@ codec_verify()
 		# Push executable (folder content) on a target device
 		local remoteDirBin
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
+		TARGET_exec "mkdir -p $remoteDirBin"
 		echo "Push codecs to remote machine $remoteDirBin ..."
 		for codecId in $CODECS; do
 			exe_${codecId} $target; encoderExe=$REPLY
@@ -352,6 +356,7 @@ cmd_intel_hw() { cmd_intel "$@"; REPLY="$REPLY -hw"; }
 exe_h265demo() { REPLY=;
 				 [[ $1 == windows ]] && REPLY=$windows_h265demo;
 				 [[ $1 == adb     ]] && REPLY=$android_h265demo;
+				 [[ $1 == ssh     ]] && REPLY=$linux_arm_h265demo;
 				 return 0;
 }
 src_h265demo() { REPLY="-i $1"; }

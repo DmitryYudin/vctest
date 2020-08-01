@@ -1,2 +1,7 @@
+# SSH target credentials
+ip=192.168.1.13
+user=ubuntu
+passw=12345678
+
 # ADB target credentials
 serial=
