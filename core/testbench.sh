@@ -55,7 +55,7 @@ entrypoint()
 {
 	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut= cmd_ncpu= cmd_endofflags=
 	local hide_banner=
-	while [ "$#" -gt 0 ]; do
+	while [[ "$#" -gt 0 ]]; do
 		local nargs=2
 		case $1 in
 			-h|--help)		usage && return;;
@@ -72,21 +72,21 @@ entrypoint()
 			*) error_exit "unrecognized option '$1'"
 		esac
 		shift $nargs
-		[ -n "$cmd_endofflags" ] && break
+		[[ -n "$cmd_endofflags" ]] && break
 	done
-	[ -n "$cmd_dirOut" ] && DIR_OUT=$cmd_dirOut
-	[ -n "$cmd_report" ] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}.kw
-	[ -n "$cmd_vec" ] && VECTORS=${cmd_vec# }
-	[ -n "$cmd_codecs" ] && CODECS=$cmd_codecs
-	[ -n "$cmd_threads" ] && THREADS=$cmd_threads
-	[ -n "$cmd_prms" ] && PRMS=$cmd_prms
-	[ -n "$cmd_presets" ] && PRESETS=$cmd_presets
-	[ -n "$cmd_ncpu" ] && NCPU=$cmd_ncpu
+	[[ -n "$cmd_dirOut" ]] && DIR_OUT=$cmd_dirOut
+	[[ -n "$cmd_report" ]] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}.kw
+	[[ -n "$cmd_vec" ]] && VECTORS=${cmd_vec# }
+	[[ -n "$cmd_codecs" ]] && CODECS=$cmd_codecs
+	[[ -n "$cmd_threads" ]] && THREADS=$cmd_threads
+	[[ -n "$cmd_prms" ]] && PRMS=$cmd_prms
+	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
+	[[ -n "$cmd_ncpu" ]] && NCPU=$cmd_ncpu
 	PRESETS=${PRESETS:--}
 	# for multithreaded run, run in single process to get valid cpu usage estimation
-	[ $THREADS -gt 1 ] && NCPU=1
+	[[ $THREADS -gt 1 ]] && NCPU=1
 
-	if [ -n "$cmd_endofflags" ]; then
+	if [[ -n "$cmd_endofflags" ]]; then
 		echo "exe: $@"
 		"$@"
 		return $?
@@ -119,9 +119,9 @@ entrypoint()
 		local outputDir="$DIR_OUT/$outputDirRel"
 
 		local encode=false
-		if [ ! -f "$outputDir/encoded.ts" ]; then
+		if [[ ! -f "$outputDir/encoded.ts" ]]; then
 			encode=true
-		elif [ $NCPU -eq 1 -a ! -f "$outputDir/cpu.log" ]; then
+		elif [[ $NCPU -eq 1 && ! -f "$outputDir/cpu.log" ]]; then
 			encode=true  # update CPU log
 		fi
 		if $encode; then
@@ -134,10 +134,10 @@ entrypoint()
 
 			encodeList="$encodeList $outputDirRel"
 		fi
-		if [ ! -f "$outputDir/decoded.ts" ]; then
+		if [[ ! -f "$outputDir/decoded.ts" ]]; then
 			decodeList="$decodeList $outputDirRel"
 		fi
-		if [ ! -f "$outputDir/parsed.ts" ]; then
+		if [[ ! -f "$outputDir/parsed.ts" ]]; then
 			parseList="$parseList $outputDirRel"
 		fi
 		reportList="$reportList $outputDirRel"
@@ -157,7 +157,7 @@ entrypoint()
 	# Encoding
 	#
 	progress_begin "[2/5] Encoding..." "$encodeList"
-	if [ -n "$encodeList" ]; then
+	if [[ -n "$encodeList" ]]; then
 		for outputDirRel in $encodeList; do
 			echo "$self --ncpu $NCPU -- encode_single_file \"$outputDirRel\""
 		done > $testplan
@@ -170,7 +170,7 @@ entrypoint()
 	#
 	NCPU=-1 # use (all+1) cores for decoding
 	progress_begin "[3/5] Decoding..." "$decodeList"
-	if [ -n "$decodeList" ]; then
+	if [[ -n "$decodeList" ]]; then
 		for outputDirRel in $decodeList; do
 			echo "$self -- decode_single_file \"$outputDirRel\""
 		done > $testplan
@@ -183,7 +183,7 @@ entrypoint()
 	#
 	NCPU=-16 # use (all + 16) cores
 	progress_begin "[4/5] Parsing..." "$parseList"
-	if [ -n "$parseList" ]; then
+	if [[ -n "$parseList" ]]; then
 		for outputDirRel in $parseList; do
 			echo "$self -- parse_single_file \"$outputDirRel\""
 		done > $testplan
@@ -197,7 +197,7 @@ entrypoint()
 	# Reporting
 	#
 	progress_begin "[5/5] Reporting..."	"$reportList"
-	if [ -z "$hide_banner" ]; then
+	if [[ -z "$hide_banner" ]]; then
 		readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 		echo "$timestamp" >> $REPORT
 		echo "$timestamp" >> $REPORT_KW
@@ -221,7 +221,7 @@ vectors_verify()
 	local VECTORS="$*" vec= removeList=
 
 	for vec in $VECTORS; do
-		if ! [ -f "$vec" ]; then
+		if ! [[ -f "$vec" ]]; then
 			echo "warning: can't find vector. Remove '$vec' from a list."
 			removeList="$removeList $vec"
 			continue
@@ -250,21 +250,21 @@ prepare_optionsFile()
 	for codecId in $CODECS; do
 	for preset in $PRESETS; do
 		local qp=- bitrate=-
-		if [ $prm -lt 60 ]; then
+		if [[ $prm -lt 60 ]]; then
 			qp=$prm
 		else
 			bitrate=$prm
 		fi
-		[ $preset == '-' ] && { codec_default_preset "$codecId"; preset=$REPLY; }
+		[[ $preset == '-' ]] && { codec_default_preset "$codecId"; preset=$REPLY; }
 		local srcRes= srcFps= srcNumFr=
 		detect_resolution_string "$src"; srcRes=$REPLY
 		detect_framerate_string "$src"; srcFps=$REPLY
 		detect_frame_num "$src" "$srcRes"; srcNumFr=$REPLY
 
 		local args="--res "$srcRes" --fps $srcFps --threads $THREADS"
-		[ $bitrate == '-' ] || args="$args --bitrate $bitrate"
-		[ $qp == '-' ]     || args="$args --qp $qp"
-		[ $preset == '-' ] || args="$args --preset $preset"
+		[[ $bitrate == '-' ]] || args="$args --bitrate $bitrate"
+		[[ $qp == '-' ]]     || args="$args --qp $qp"
+		[[ $preset == '-' ]] || args="$args --preset $preset"
 
 		local encExe= encExeHash= encCmdArgs= encCmdHash=
 		codec_exe $codecId; encExe=$REPLY
@@ -272,7 +272,7 @@ prepare_optionsFile()
 		codec_cmdArgs $codecId $args; encCmdArgs=$REPLY
 
 		local SRC=${src//\\/}; SRC=${SRC##*[/\\]} # basename only
-		local ext=h265; [ $codecId == h264demo ] && ext=h264
+		local ext=h265; [[ $codecId == h264demo ]] && ext=h264
 		local dst="$SRC.$ext"
 
 		local info="src:$src codecId:$codecId srcRes:$srcRes srcFps:$srcFps srcNumFr:$srcNumFr"
@@ -328,7 +328,7 @@ start_cpu_monitor()
 	local name=$(basename "$encoderExe"); name=${name%.*}
 
 	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
-	if [ $cpu_monitor_type == windows ]; then
+	if [[ $cpu_monitor_type == windows ]]; then
 		typeperf '\Process('$name')\% Processor Time' &
 		PERF_ID=$!
 	else
@@ -338,7 +338,7 @@ start_cpu_monitor()
 }
 stop_cpu_monitor()
 {
-	[ -z "$PERF_ID" ] && return 0
+	[[ -z "$PERF_ID" ]] && return 0
 	{ kill -s INT $PERF_ID && wait $PERF_ID; } || true 
 	PERF_ID=
 }
@@ -364,7 +364,7 @@ progress_begin()
 	done
 	print_console "$name\n"
 
-	if [ $PROGRESS_CNT_TOT == 0 ]; then
+	if [[ $PROGRESS_CNT_TOT == 0 ]]; then
 		print_console "No tasks to execute\n\n"
 	else
 		printf 	-v str "%8s %4s %-8s %11s %5s %2s %6s" "Time" $PROGRESS_CNT_TOT codecId resolution '#frm' QP BR 
@@ -379,7 +379,7 @@ progress_next()
 
 	info=$(cat $outputDir/info.kw)
 
-	if [ -n "$PROGRESS_HDR" ]; then
+	if [[ -n "$PROGRESS_HDR" ]]; then
 		print_console "$PROGRESS_HDR\n"
 		PROGRESS_HDR=
 	fi
@@ -411,7 +411,7 @@ progress_next()
 }
 progress_end()
 {
-	[ $PROGRESS_CNT == 0 ] && return
+	[[ $PROGRESS_CNT == 0 ]] && return
 
 	local duration=$(( SECONDS - PROGRESS_SEC ))
 	duration=$(date +%H:%M:%S -u -d @${duration})
@@ -532,7 +532,7 @@ encode_single_file()
 	codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
 
 	# temporary hack, for backward compatibility (remove later)
-	[ $codecId == h265demo ] && encCmdArgs="-c h265demo.cfg $encCmdArgs"
+	[[ $codecId == h265demo ]] && encCmdArgs="-c h265demo.cfg $encCmdArgs"
 
 	local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
 	echo "$cmd" > cmd # memorize
@@ -542,11 +542,11 @@ encode_single_file()
 	local fpsLog=fps.log
 
 	# temporary hack, for backward compatibility (remove later)
-	[ $codecId == h265demo ] && echo "" > h265demo.cfg
+	[[ $codecId == h265demo ]] && echo "" > h265demo.cfg
 
 	# Make estimates only if one instance of the encoder is running at a time
 	local estimate_execution_time=false
-	if [ $NCPU == 1 ]; then
+	if [[ $NCPU == 1 ]]; then
 		estimate_execution_time=true
 	fi
 
@@ -567,7 +567,7 @@ encode_single_file()
 
 	if $estimate_execution_time; then
 		local fps=0
-		[ $consumedSec != 0 ] && fps=$(( 1000*srcNumFr/consumedSec ))
+		[[ $consumedSec != 0 ]] && fps=$(( 1000*srcNumFr/consumedSec ))
 		echo "$fps" > $fpsLog
 
 		# Stop CPU monitor
@@ -629,8 +629,8 @@ decode_single_file()
 					cnt=$(( cnt + 1 ))
 				;;
 				'[/FRAME]')
-					[ $type == I ] && numI=$(( numI + 1 )) && sizeI=$(( sizeI + size ))
-					[ $type == P ] && numP=$(( numP + 1 )) && sizeP=$(( sizeP + size ))
+					[[ $type == I ]] && numI=$(( numI + 1 )) && sizeI=$(( sizeI + size ))
+					[[ $type == P ]] && numP=$(( numP + 1 )) && sizeP=$(( sizeP + size ))
 					echo "n:$cnt type:$type size:$size"
 				;;
 			esac
@@ -667,11 +667,11 @@ parse_single_file()
 	local summaryLog=summary.log
 
 	local cpuAvg=- extFPS=- intFPS= framestat=
-	if [ -f "$cpuLog" ]; then # may not exist
+	if [[ -f "$cpuLog" ]]; then # may not exist
 		cpuAvg=$(parse_cpuLog "$cpuLog")
 		printf -v cpuAvg "%.0f" "$cpuAvg"
 	fi
-	if [ -f "$fpsLog" ]; then # may not exist
+	if [[ -f "$fpsLog" ]]; then # may not exist
 		extFPS=$(cat "$fpsLog")
 	fi
 	intFPS=$(parse_stdoutLog "$codecId" "$stdoutLog")
@@ -710,7 +710,7 @@ parse_framestat()
 	kbps=$(cat "$kbpsLog")
 
 	local psnrI= psnrP= gPSNR=
-	if [ 0 == 1 ]; then # Avg(FramePSNR)
+	if [[ 0 == 1 ]]; then # Avg(FramePSNR)
 		psnrI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_avg:\([^ ]*\).*/\1/' | countAverage )
 		psnrP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_avg:\([^ ]*\).*/\1/' | countAverage )
 	else                # GlobalPSNR( Avg(Y), Avg(U), Avg(V) ) <= x265
@@ -732,7 +732,7 @@ parse_framestat()
 	}
 
 	local ssimI= ssimP= gSSIM=
-	if [ 0 == 1 ]; then # Full
+	if [[ 0 == 1 ]]; then # Full
 		ssimI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
 		ssimP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
 		gSSIM=$(              cat "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
@@ -771,7 +771,7 @@ parse_cpuLog()
 	local log=$1; shift
 	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
 
-	if [ $cpu_monitor_type == windows ]; then
+	if [[ $cpu_monitor_type == windows ]]; then
 #: <<'FORMAT'
 #                                                                             < skip (first line is empty)
 #"(PDH-CSV 4.0)","\\DESKTOP-7TTKF98\Process(sample_encode)\% Processor Time"  < skip

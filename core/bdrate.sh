@@ -34,9 +34,9 @@ usage()
 
 entrypoint()
 {
-	[ "$#" -eq 0 ] && usage && echo "error: arguments required" >&2 && return 1
+	[[ "$#" -eq 0 ]] && usage && echo "error: arguments required" >&2 && return 1
 
-	while [ "$#" -gt 0 ]; do
+	while [[ "$#" -gt 0 ]]; do
 		case $1 in
 			-h|--help)		usage && return;;
 			-i|--input)     INPUT_LOG=$2;;
@@ -46,8 +46,8 @@ entrypoint()
 		esac
 		shift 2
 	done
-	[ -z "$INPUT_LOG" ] && error_exit "input log file not set"
-	[ -z "$KEYS" ] && KEYS=gPSNR
+	[[ -z "$INPUT_LOG" ]] && error_exit "input log file not set"
+	[[ -z "$KEYS" ]] && KEYS=gPSNR
 
 	local codec= codecs=
 	{
@@ -55,8 +55,8 @@ entrypoint()
 			cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:" | while read -r; do dict_getValue "$REPLY" codecId; echo "$REPLY"; done \
 				| sort -u --ignore-leading-blanks --ignore-case | tr $'\n' ' '
 		)
-		[ -z "$codecs" ] && error_exit "no codecs found"
-		if [ -z "$REF_CODEC" ]; then
+		[[ -z "$codecs" ]] && error_exit "no codecs found"
+		if [[ -z "$REF_CODEC" ]]; then
 			for REF_CODEC in $codecs; do
 				break			
 			done
@@ -65,9 +65,9 @@ entrypoint()
 
 		local codec= found=
 		for codec in $codecs; do
-			[ $codec == "$REF_CODEC" ] && found=1
+			[[ $codec == "$REF_CODEC" ]] && found=1
 		done
-		[ -z "found" ] && error_exit "$REF_CODEC not found in codecs list: $codecs"
+		[[ -z "found" ]] && error_exit "$REF_CODEC not found in codecs list: $codecs"
 	}
 
 	local src= vectors=
@@ -98,7 +98,7 @@ entrypoint()
 				)
 			}
 	    
-			[ $codec == "$REF_CODEC" ] && continue
+			[[ $codec == "$REF_CODEC" ]] && continue
 			tstData=$(
 				cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:$codec[ $]" | grep -i "${KEY_DELIM}SRC:$src[ $]" | \
 					while read -r; do 
@@ -116,7 +116,7 @@ entrypoint()
 			printf -v report "%s BD-rate($key):%-6.2f BD-PSNR($key):%-6.2f" "$report" "$bdRate" "$bdPSNR"
 		done
 		report=${report# }
-		if [ -n "$report" ]; then
+		if [[ -n "$report" ]]; then
 			printf "ref:%-10s tst:%-10s $report SRC:%s\n" "$REF_CODEC" "$codec" "$src"
 		fi
 	done

@@ -17,7 +17,7 @@ error_exit()
 ospath() # ~= cygpath -m
 {
 	local path=$1; shift
-	[ -n "${WSL_DISTRO_NAME:-}" ] && command wslpath -m "$path" && return
+	[[ -n "${WSL_DISTRO_NAME:-}" ]] && command wslpath -m "$path" && return
 	case ${OS:-} in 
 		*_NT) : ;;
 		*) echo "$path" && return;;
@@ -46,13 +46,13 @@ relative_path()
 dict_checkKey()
 {
 	local dict=$1 key=$2; val=${dict#*$key:};
-	[ "$val" == "$dict" ] && return 1
+	[[ "$val" == "$dict" ]] && return 1
 	return 0
 }
 dict_getValue()
 {
 	local dict=$1 key=$2; val=${dict#*$key:};
-	[ "$val" == "$dict" ] && error_exit "can't find key=$key"
+	[[ "$val" == "$dict" ]] && error_exit "can't find key=$key"
 	val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
 	val=${val%%[ $'\t']*} # Cut everything after left most whitespace
 	REPLY=$val
@@ -60,7 +60,7 @@ dict_getValue()
 dict_getValueEOL()
 {
 	local dict=$1 key=$2; val=${dict#*$key:};
-	[ "$val" == "$dict" ] && error_exit "can't find key=$key"
+	[[ "$val" == "$dict" ]] && error_exit "can't find key=$key"
 	val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
 	REPLY=$val
 }
@@ -82,14 +82,14 @@ print_console()
 {
 	cut_to_console_width()
 	{
-		if [ -z "${COLUMNS:-}" ]; then
+		if [[ -z "${COLUMNS:-}" ]]; then
 			case ${OS:-} in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2) && export COLUMNS; esac
 		fi
 
 		# Note, Windows terminal inserts carriage character after printed string
 		# this results in line break if len(str) == NUM_COLUMNS. So we cut to NUM_COLUMNS-1 length
 		REPLY=$*
-		[ -n "${COLUMNS:-}" ] && [ "${#REPLY}" -ge "${COLUMNS:-}" ] && REPLY="${REPLY:0:$((COLUMNS - 5))}..."
+		[[ -n "${COLUMNS:-}" && "${#REPLY}" -ge "${COLUMNS:-}" ]] && REPLY="${REPLY:0:$((COLUMNS - 5))}..."
 
 		return 0
 	}
@@ -97,14 +97,14 @@ print_console()
 	local str=$* nl= cr= line_clear=
 	str=${str//"\r"/$'\r'}
 	str=${str//"\n"/$'\n'}
-#	[ "${str: -1}" == $'\r' ] && str=${str%$'\r'} && cr=1
-	[ "${str: -1}" == $'\r' ] && str=${str%$'\r'} && cr=1
-	[ "${str: -1}" == $'\n' ] && str=${str%$'\n'} && nl=1
+#	[[ "${str: -1}" == $'\r' ]] && str=${str%$'\r'} && cr=1
+	[[ "${str: -1}" == $'\r' ]] && str=${str%$'\r'} && cr=1
+	[[ "${str: -1}" == $'\n' ]] && str=${str%$'\n'} && nl=1
 
 	cut_to_console_width "$str"; str=$REPLY
 
-	[ -n "$nl" ] && str="$str"$'\n'
-	[ -n "$cr" ] && str="$str"$'\r' && line_clear="\\x1B[2K"
+	[[ -n "$nl" ]] && str="$str"$'\n'
+	[[ -n "$cr" ]] && str="$str"$'\r' && line_clear="\\x1B[2K"
 	printf "$line_clear%s" "$str" > /dev/tty
 }
 
@@ -125,9 +125,9 @@ detect_resolution_string()
 				res=$i && break
 			fi
 		done
-		[ -n "$res" ] && break
+		[[ -n "$res" ]] && break
 	done
-	[ -n "$res" ] && REPLY=$res && return
+	[[ -n "$res" ]] && REPLY=$res && return
 
 	# try abbreviations CIF, QCIF, ... delimited by "." or "_"
 	for delim in _ .; do
@@ -160,11 +160,11 @@ detect_resolution_string()
 			      4K|4k)     res=3840x2160;;
 			      8K|8k)     res=7680x4320;;
 			esac
-			[ -n "$res" ] && break
+			[[ -n "$res" ]] && break
 		done
-		[ -n "$res" ] && break
+		[[ -n "$res" ]] && break
 	done
-	[ -z "$res" ] && error_exit "can't detect resolution $filename"
+	[[ -z "$res" ]] && error_exit "can't detect resolution $filename"
 
 	REPLY=$res
 }
@@ -185,9 +185,9 @@ detect_framerate_string()
 				framerate=${i%fps} && break
 			fi
 		done
-		[ -n "$framerate" ] && break
+		[[ -n "$framerate" ]] && break
 	done
-	[ -z "$framerate" ] && framerate=30
+	[[ -z "$framerate" ]] && framerate=30
 
 	REPLY=$framerate
 }
@@ -196,19 +196,19 @@ detect_frame_num()
 {
 	local filename=$1; shift
 	local res=${1:-};
-	if [ -z "$res" ]; then
+	if [[ -z "$res" ]]; then
 		detect_resolution_string "$filename" && res=$REPLY
 	fi
-	[ -z "$res" ] && return
+	[[ -z "$res" ]] && return
 
 	local numBytes=$(stat -c %s "$filename")
-	[ -z "$numBytes" ] && return 1
+	[[ -z "$numBytes" ]] && return 1
 
 	local width=${res%%x*}
 	local height=${res##*x}
 	local numFrames=$(( 2 * numBytes / width / height / 3 )) 
 	local numBytes2=$(( 3 * numFrames * width * height / 2 ))
-	[ $numBytes != $numBytes2 ] && error_exit "can't detect frames number $filename"
+	[[ $numBytes != $numBytes2 ]] && error_exit "can't detect frames number $filename"
 
 	REPLY=$numFrames
 }

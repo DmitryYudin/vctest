@@ -48,9 +48,9 @@ EOT
 entrypoint()
 {
 	local BUSYBOX=$(cat --help 2>&1 | head -1 | grep BusyBox) || true
-	[ -n "$BUSYBOX" ]             && ENABLE_NAMED_PIPE=0 # not supported
-	[ -n "${KSH_VERSION:-}" ]     && ENABLE_NAMED_PIPE=0 # not supported (Android shell)
-	[ -n "${WSL_DISTRO_NAME:-}" ] && ENABLE_NAMED_PIPE=0 # broken
+	[[ -n "$BUSYBOX" ]]             && ENABLE_NAMED_PIPE=0 # not supported
+	[[ -n "${KSH_VERSION:-}" ]]     && ENABLE_NAMED_PIPE=0 # not supported (Android shell)
+	[[ -n "${WSL_DISTRO_NAME:-}" ]] && ENABLE_NAMED_PIPE=0 # broken
 	readonly ENABLE_NAMED_PIPE
 
 	local do_test=false
@@ -93,7 +93,7 @@ jobsGetStatus()
 # Ping self to report execution progress till the statusPIPE opened
 jobsStartPing()
 {
-	[ $ENABLE_NAMED_PIPE != 1 ] && return 1
+	[[ $ENABLE_NAMED_PIPE != 1 ]] && return 1
 
 	local period=$1
 	{
@@ -139,15 +139,15 @@ executeSingleTask()
 
 	# Prepare redirections
 	exec 3>"$tempPath/$id.stdout.log"
-	[ $__jobsStderrToStdout == 0 ] && exec 4>"$tempPath/$id.stderr.log"
-	[ $__jobsStderrToStdout != 0 ] && exec 4>&3
+	[[ $__jobsStderrToStdout == 0 ]] && exec 4>"$tempPath/$id.stderr.log"
+	[[ $__jobsStderrToStdout != 0 ]] && exec 4>&3
 
 	# Run
 	local error_code=0
 	{
 		"$@"
         error_code=$?
-		[ -n "$userText" ] && echo "$userText"
+		[[ -n "$userText" ]] && echo "$userText"
 	} </dev/null 1>&3 2>&4 3>&- 4>&-
 	exec 3>&- 4>&-
 
@@ -175,7 +175,7 @@ executeSingleTask()
 # variable.
 jobsStartWorker()
 {
-	[ $ENABLE_NAMED_PIPE != 1 ] && return 1
+	[[ $ENABLE_NAMED_PIPE != 1 ]] && return 1
 
 	local -
 	set -eu
@@ -189,7 +189,7 @@ jobsStartWorker()
 	local runningTaskCmd=
 	onWorkerExit() {
 		local error_code=0
-		[ -n "$runningTaskId" ] && error_code=1
+		[[ -n "$runningTaskId" ]] && error_code=1
 		echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"$ARG_DELIM > $__jobsStatusPipe
 		exit $error_code
 	}
@@ -208,17 +208,17 @@ jobsStartWorker()
 
 		# Open for reading (prevent 'Device or resource busy' error)
 		while ! exec 3<$__jobsWorkPipe; do
-			[ ! -e $__jobsWorkPipe ] && break
+			[[ ! -e $__jobsWorkPipe ]] && break
 			sleep .1s
 		done
-		[ ! -e $__jobsWorkPipe ] && break
+		[[ ! -e $__jobsWorkPipe ]] && break
 
 		# do not break execution on read error
 		if ! readNewTask ':' <&3; then
 			REPLY=
 		fi
 		exec 3>&-;
-		[ -z "$REPLY" ] && break
+		[[ -z "$REPLY" ]] && break
 		id=${REPLY%$ARG_DELIM*}
 		cmd=${REPLY#*$ARG_DELIM}
 	done
@@ -231,14 +231,14 @@ readonly symCheck=$'\xe2\x88\x9a' symSun=$'\xe2\x98\xbc' symSmile=$'\xe2\x98\xba
 pbar_getStatus()
 {
 	REPLY=$symSun
-	[ $__jobsNoMoreTasks != 0 ] && { [ $__jobsRunning != 0 ] && REPLY=$symSmile || REPLY=$symCheck; }
-	[ $__jobsErrorCnt != 0 -o $__jobsInterruptCnt != 0 ] && REPLY=$symExcl
+	[[ $__jobsNoMoreTasks != 0 ]] && { [[ $__jobsRunning != 0 ]] && REPLY=$symSmile || REPLY=$symCheck; }
+	[[ $__jobsErrorCnt != 0 || $__jobsInterruptCnt != 0 ]] && REPLY=$symExcl
 	return 0
 }
 pbar_getAnim()
 {
 #	local pos=$1; shift
-	[ -z "${__aminCounter:-}" ] && __aminCounter=0 # static variable here
+	[[ -z "${__aminCounter:-}" ]] && __aminCounter=0 # static variable here
 	local pos=$__aminCounter; __aminCounter=$(( __aminCounter + 1 ))
 	local patt=\
 ">   ""->  ""--> ""--->""=-->"" =->""  =>""   >""   <"">  <""-> <""--><""=-><"" =><""  ><""  <<"\
@@ -249,16 +249,16 @@ pbar_getTimestamp()
 {
 	local dt=$1; shift
 	local hr=$(( dt/60/60 )) min=$(( (dt/60) % 60 )) sec=$(( dt % 60 ))
-	[ ${#min} == 1 ] && min=0$min
-	[ ${#sec} == 1 ] && sec=0$sec
-	[ ${#hr}  == 1 ] && hr=0$hr
+	[[ ${#min} == 1 ]] && min=0$min
+	[[ ${#sec} == 1 ]] && sec=0$sec
+	[[ ${#hr}  == 1 ]] && hr=0$hr
 	REPLY="$hr:$min:$sec"
 }
 pbar_getJobsMax()
 {
 	REPLY="   "$symInf # 'printf' does not align unicode characters as expected
-	[ $__jobsNoMoreTasks != 0 ] && REPLY=$(( __jobsDone + __jobsRunning )) # estimate
-	[ $__jobsDoneMax != 0 ] && REPLY=$__jobsDoneMax # use if known beforehand
+	[[ $__jobsNoMoreTasks != 0 ]] && REPLY=$(( __jobsDone + __jobsRunning )) # estimate
+	[[ $__jobsDoneMax != 0 ]] && REPLY=$__jobsDoneMax # use if known beforehand
 	return 0;
 }
 jobsReportProgress()
@@ -272,16 +272,16 @@ jobsReportProgress()
 	pbar_getJobsMax;       tot=$REPLY
 
 	# replace animation by error info
-	if [ $__jobsErrorCnt != 0 -o $__jobsInterruptCnt != 0 ]; then
-		[ $__jobsTermReasonInt == 0 ] && label="#E=$__jobsErrorCnt" || label='INT'
+	if [[ $__jobsErrorCnt != 0 || $__jobsInterruptCnt != 0 ]]; then
+		[[ $__jobsTermReasonInt == 0 ]] && label="#E=$__jobsErrorCnt" || label='INT'
 	fi
 
 	local runWidth=1
-	[ $__jobsRunning -ge 10 ] && runWidth=2
-	[ $__jobsRunning -ge 100 ] && runWidth=3
+	[[ $__jobsRunning -ge 10 ]] && runWidth=2
+	[[ $__jobsRunning -ge 100 ]] && runWidth=3
 
 	local str
-	if [ $ENABLE_NAMED_PIPE == 1 ]; then
+	if [[ $ENABLE_NAMED_PIPE == 1 ]]; then
 		printf -v str "$timestamp %s[%4s/%4s][#%${runWidth}s]%4s|%s" \
 			"$status" $__jobsDone "$tot" $__jobsRunning "$label" "$__jobsDisplay"
 	else
@@ -289,11 +289,11 @@ jobsReportProgress()
 			"$status" $__jobsDone "$tot" "$__jobsDisplay"
 	fi
 
-	if [ ${COLUMNS:-0} -gt 4 -a ${#str} -gt ${COLUMNS:-0} ]; then
+	if [[ ${COLUMNS:-0} -gt 4 && ${#str} -gt ${COLUMNS:-0} ]]; then
 		str=${str:0:$(( COLUMNS - 5 ))}...
 	fi
 	local CSI=$'\033[' RESET= CLR_R=
-	[ -t 1 ] && { CLR_R=${CSI}0K; RESET=${CSI}m; }
+	[[ -t 1 ]] && { CLR_R=${CSI}0K; RESET=${CSI}m; }
 	printf "${CLR_R}%s${RESET}\r" "$str"
 }
 
@@ -304,15 +304,15 @@ jobsReportTaskFail()
 	local cmd=$1; shift
 
 	local CSI=$'\033[' RESET= CLR_R=
-	[ -t 1 ] && { CLR_R=${CSI}0K; RESET=${CSI}m; }
+	[[ -t 1 ]] && { CLR_R=${CSI}0K; RESET=${CSI}m; }
 	echo "" # push progressbar
 	echo "${CLR_R}Fail:$id:$status:$cmd${RESET}"
-	if [ $__jobsErrorCnt -eq 1 -o $__jobsLogLevel -gt 1 ]; then
+	if [[ $__jobsErrorCnt -eq 1 || $__jobsLogLevel -gt 1 ]]; then
 		local color=yes BOLD= RED=
-		[ -t 1 -a "$color" == yes ] && { BOLD=${CSI}1m; RED=${CSI}31m; }
+		[[ -t 1 && "$color" == yes ]] && { BOLD=${CSI}1m; RED=${CSI}31m; }
 		echo -e "$BOLD<stdout:$id>"
 		cat "$tempPath/$id.stdout.log"
-		if [ "$__jobsStderrToStdout" == 0 ]; then
+		if [[ "$__jobsStderrToStdout" == 0 ]]; then
 			echo -e "$BOLD$RED<stderr:$id>"
 			cat "$tempPath/$id.stderr.log"
 		fi
@@ -331,22 +331,22 @@ readNewTask()
 	while read -r; do   # Remove leading and trailing whitespaces
 		local x=$REPLY; x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}; REPLY=$x
 		case $REPLY in '#'*) continue;; esac # comment
-		[ -z "$REPLY" ] && continue
-		if [ "$REPLY" == $REPLY_EOF ]; then
+		[[ -z "$REPLY" ]] && continue
+		if [[ "$REPLY" == $REPLY_EOF ]]; then
 			REPLY=
 			return
 		fi
 
 		local id= cmd=$REPLY
-		if [ -n "$delim" ]; then
+		if [[ -n "$delim" ]]; then
 			id=${REPLY%%$delim*}
 			cmd=${REPLY#"$id$delim"}
-			[ "$id" == "$REPLY" ] && echo "error: can't parse task id from '$REPLY'" >&2 && return 1
+			[[ "$id" == "$REPLY" ]] && echo "error: can't parse task id from '$REPLY'" >&2 && return 1
 			x=$id;  x=${x%"${x##*[! $'\t']}"}; id=$x
 			x=$cmd; x=${x#"${x%%[! $'\t']*}"}; cmd=$x
 		fi
 		# make sure $cmd is not empty
-		if [ -n "$cmd" ]; then
+		if [[ -n "$cmd" ]]; then
 			REPLY=$id$ARG_DELIM$cmd
 			return
 		fi
@@ -361,11 +361,11 @@ jobsRunTasks()
 
 	local taskTxt= delim= tempPath=. logLevel= runMax=1 userText= userFlags=
 	# set all 'kw' args to "-k v" form (accepted input: -kv | -k=v | -k v)
-	while [ $# != 0 ]; do
+	while [[ $# != 0 ]]; do
 		local i=$1 v; shift
 		case $i in -*) v=${i:2}; i=${i:0:2}; v=${v#=}; 
-			if [ -z "$v" ]; then
-				[ $# == 0 ] && echo "error: argument required for '$i' option" >&2 && return 1
+			if [[ -z "$v" ]]; then
+				[[ $# == 0 ]] && echo "error: argument required for '$i' option" >&2 && return 1
 			 	v=$1; shift;
 			fi 
 		esac
@@ -376,23 +376,23 @@ jobsRunTasks()
 			-j*) runMax=$v;; # 0 => all CPUs, < 0 => nCPU+|x|
 			-t*) userText=$v;;
 			-f*) userFlags=$v;;
-			*)	[ -z "$taskTxt" ] && { taskTxt=$i; continue; }
+			*)	[[ -z "$taskTxt" ]] && { taskTxt=$i; continue; }
 				echo "error: unrecognized option $i" >&2 && return 1;
 		esac
 	done
-	[ -z "$taskTxt" ] && { echo "error: not task file" >&2 && return 1; }
-	[ ! -f "$taskTxt" ] && { echo "error: task file $taskTxt does not exist" >&2 && return 1; }
+	[[ -z "$taskTxt" ]] && { echo "error: not task file" >&2 && return 1; }
+	[[ ! -f "$taskTxt" ]] && { echo "error: task file $taskTxt does not exist" >&2 && return 1; }
 
 	# Get last cpu index. We are going to use NCPU-1 cores to run
-	if [ "$runMax" -le 0 ]; then
+	if [[ "$runMax" -le 0 ]]; then
 		x="$(grep 'processor' /proc/cpuinfo)"; x="${x##* }"; # last cpu index
-		if [ "$runMax" == 0 ]; then
+		if [[ "$runMax" == 0 ]]; then
 			runMax=$(( x + 1 ))
 		else
-			[ "$x" == 0 ] && runMax=1 || runMax=$((x + 1 - runMax))
+			[[ "$x" == 0 ]] && runMax=1 || runMax=$((x + 1 - runMax))
 		fi
 	fi
-	[ "$runMax" -le 0 ] && { echo "error: can't detect CPU number" >&2 && return 1; }
+	[[ "$runMax" -le 0 ]] && { echo "error: can't detect CPU number" >&2 && return 1; }
 
 	mkdir -p "$tempPath"
 	tempPath="$(cd "$tempPath" >/dev/null; pwd)"
@@ -409,19 +409,19 @@ jobsRunTasks()
 	__jobsStartSec=$SECONDS
 	__jobsDisplay=
 	while readNewTask "$delim"; do
-		[ -z "$REPLY" ] && break
+		[[ -z "$REPLY" ]] && break
 		__jobsDoneMax=$(( __jobsDoneMax + 1 ))
 	done <"$taskTxt"
 
 	#
 	# Single-threaded
 	#
-	if [ $ENABLE_NAMED_PIPE != 1 ]; then
+	if [[ $ENABLE_NAMED_PIPE != 1 ]]; then
 		while readNewTask "$delim"; do
-			[ -z "$REPLY" ] && break
+			[[ -z "$REPLY" ]] && break
 			local id=${REPLY%$ARG_DELIM*}
 			local cmd=${REPLY#*$ARG_DELIM}
-			[ -n "$id" ] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
+			[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 
 			__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
 			__jobsRunning=1
@@ -447,20 +447,20 @@ jobsRunTasks()
 	#
 	jobsOnINT() {
 		# most likely stderr is redirected to /dev/null at this moment
-		[ $__jobsInterruptCnt == 0 -a $__jobsErrorCnt == 0 ] && __jobsTermReasonInt=1
+		[[ $__jobsInterruptCnt == 0 && $__jobsErrorCnt == 0 ]] && __jobsTermReasonInt=1
 		__jobsInterruptCnt=$(( __jobsInterruptCnt + 1 ))
 		# unblock everything
 		rm -f -- $__jobsStatusPipe # need abspath to a 'pipe' since 'pwd' is unpredictable here
 		rm -f -- $__jobsWorkPipe
-		if [ -n "$__jobsPingPid" ]; then
+		if [[ -n "$__jobsPingPid" ]]; then
 			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 2>/dev/null
 			__jobsPingPid=
 		fi
-		if [ -n "$__jobsPid" ]; then
+		if [[ -n "$__jobsPid" ]]; then
 			{ kill -s KILL $__jobsPid && wait $__jobsPid || true; } 2>/dev/null
 			__jobsPid=
 		fi
-#		[ $__jobsInterruptCnt -ge 3 ] && exit 127
+#		[[ $__jobsInterruptCnt -ge 3 ]] && exit 127
 		exit 127
 
 		return 0
@@ -471,10 +471,10 @@ jobsRunTasks()
 		rm -f -- $__jobsStatusPipe # need abspath to a 'pipe' since 'pwd' is unpredictable here
 		rm -f -- $__jobsWorkPipe
 
-		if [ -n "$__jobsPingPid" ]; then
+		if [[ -n "$__jobsPingPid" ]]; then
 			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 1>/dev/null  2>/dev/null
 		fi
-		if [ -n "$__jobsPid" ]; then
+		if [[ -n "$__jobsPid" ]]; then
 			echo "warn: waiting for unfinished jobs: $__jobsPid"
 			{ kill -s TERM $__jobsPid && wait $__jobsPid || true; } >/dev/null
 		fi
@@ -503,10 +503,10 @@ jobsRunTasks()
 	while [ $__jobsRunning -lt $runMax ]; do
 
 		readNewTask "$delim" <&4
-		[ -z "$REPLY" ] && break;
+		[[ -z "$REPLY" ]] && break;
 		local id=${REPLY%$ARG_DELIM*}
 		local cmd=${REPLY#*$ARG_DELIM}
-		[ -n "$id" ] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
+		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 
 		jobsStartWorker "$id" "$cmd" "$userText" "$userFlags" 4<&- &
 
@@ -514,24 +514,24 @@ jobsRunTasks()
 		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
 		__jobsRunning=$(( __jobsRunning + 1 ))
 	done
-	[ $__jobsRunning -lt $runMax ] && __jobsNoMoreTasks=1
+	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
 	setWorkerGone() {
 		local pid=$1 x=; shift
 		{ wait $pid || true; } 2>/dev/null  # may have already gone
 		set -- $__jobsPid; # remove from wait list
-		for x; do shift; if [ $x != $pid ]; then set -- "$@" $x; fi; done
+		for x; do shift; if [[ $x != $pid ]]; then set -- "$@" $x; fi; done
 		__jobsPid="$@"
 		__jobsRunning=$((__jobsRunning - 1))		# worker exit
 	}
 	while : ; do
 		local pid # <- long live variable
 		# Until have workers running
-		while [ $__jobsRunning != 0 ]; do
+		while [[ $__jobsRunning != 0 ]]; do
 			jobsReportProgress
 
 			# Check feedback pipe still alived and not get destroyed on interrupt
-			[ ! -e $__jobsStatusPipe ] && break
+			[[ ! -e $__jobsStatusPipe ]] && break
 
 			# Only extract one message per pipe read access (i.e. not reading from 'fd' in a loop).
 			# This case we will have 'read' blocked till message appeared in a pipe.
@@ -548,27 +548,27 @@ jobsRunTasks()
 			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; id=$x  # maybe empty
 			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; status=$x
 			data=$x
-			if [ -z "$id" ]; then
+			if [[ -z "$id" ]]; then
 				setWorkerGone $pid; pid= # worker exit due to interrupt
 			else
 				__jobsDone=$(( __jobsDone + 1 ))
-				if [ "$status" != 0 ]; then
+				if [[ "$status" != 0 ]]; then
 					setWorkerGone $pid; pid= # worker exit due to task fail
 
 					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
 					jobsReportTaskFail "$id" $status "$data" >&2
 				fi
 			fi
-			[ -n "$pid" ] && break; # worker is waiting us a new task
+			[[ -n "$pid" ]] && break; # worker is waiting us a new task
 		done
 		jobsReportProgress
 
 		# Time to leave if no workers alive
-		[ $__jobsRunning == 0 ] && break;
+		[[ $__jobsRunning == 0 ]] && break;
 
-		if [ $__jobsNoMoreTasks == 0 -a $__jobsErrorCnt == 0 -a $__jobsInterruptCnt == 0 ]; then
+		if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
 			readNewTask "$delim" <&4
-			[ -z "$REPLY" ] && __jobsNoMoreTasks=1
+			[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1
 		else
 			REPLY=
 		fi
@@ -577,19 +577,19 @@ jobsRunTasks()
 
 		local task;
 		# Reply with EOF message if no task was read
-		if [ -z "$cmd" ]; then
+		if [[ -z "$cmd" ]]; then
 			task=$REPLY_EOF
 			__jobsDisplay="no more tasks to schedule"
 		else
 			pid= # leave worker alive
-			[ -n "$id" ] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
+			[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 			task=$id:$cmd
 			__jobsDisplay=$task${userFlags:+ $userFlags}
 		fi
 		jobsReportProgress
 		echo "$task" 2>/dev/null >$__jobsWorkPipe
 
-		if [ -n "$pid" ]; then
+		if [[ -n "$pid" ]]; then
 			setWorkerGone $pid; pid=; # worker exit
 		fi
 	done

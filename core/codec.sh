@@ -44,11 +44,11 @@ codec_exe()
 	local codecId=$1 encoderExe=
 
 	eval "local cachedVal=\${CACHE_path_${codecId}:-}"
-	if [ -n "$cachedVal" ]; then
+	if [[ -n "$cachedVal" ]]; then
 		encoderExe=$cachedVal
 	else
 		exe_${codecId}; encoderExe=$REPLY
-		[ -f "$encoderExe" ] || error_exit "encoder does not exist '$encoderExe'"
+		[[ -f "$encoderExe" ]] || error_exit "encoder does not exist '$encoderExe'"
 		encoderExe=$(realpath "$encoderExe")
 		eval "CACHE_path_${codecId}=$encoderExe"
 	fi
@@ -60,7 +60,7 @@ codec_hash()
 	local codecId=$1 hash=
 
 	eval "local cachedVal=\${CACHE_hash_${codecId}:-}"
-	if [ -n "$cachedVal" ]; then
+	if [[ -n "$cachedVal" ]]; then
 		hash=$cachedVal
 	else
 		local encoderExe
@@ -108,7 +108,7 @@ codec_verify()
 
 	for codecId in $CODECS; do
 		exe_${codecId}; encoderExe=$REPLY
-		if ! [ -f "$encoderExe" ]; then
+		if ! [[ -f "$encoderExe" ]]; then
 			echo "warning: can't find executable. Remove '$codecId' from a list."
 			removeList="$removeList $codecId"
 			continue
@@ -116,7 +116,7 @@ codec_verify()
 
 		local cmd=$encoderExe
 		# temporary hack, for backward compatibility (remove later)
-		if [ $codecId == h265demo ]; then
+		if [[ $codecId == h265demo ]]; then
 			echo "" > $dirOut/h265demo.cfg
 			cmd="$cmd -c $(ospath "$dirOut/h265demo.cfg")"
 		fi
@@ -146,7 +146,7 @@ dst_x265() { REPLY="--output $1"; }
 cmd_x265()
 {
 	local args= threads=0
-	while [ "$#" -gt 0 ]; do
+	while [[ "$#" -gt 0 ]]; do
 		case $1 in
 			-i|--input) 	args="$args --input $2";;
 			-o|--output) 	args="$args --output $2";;
@@ -217,7 +217,7 @@ dst_kvazaar() { REPLY="--output $1"; }
 cmd_kvazaar()
 {
 	local args= threads=0
-	while [ "$#" -gt 0 ]; do
+	while [[ "$#" -gt 0 ]]; do
 		case $1 in
 			-i|--input) 	args="$args --input $2";;
 			-o|--output) 	args="$args --output $2";;
@@ -279,7 +279,7 @@ cmd_kingsoft()
 cmd_intel()
 {
 	local args= threads=1 res=
-	while [ "$#" -gt 0 ]; do
+	while [[ "$#" -gt 0 ]]; do
 		case $1 in
 			-i|--input) 	args="$args -i $2";;
 			-o|--output) 	args="$args -o $2";;
@@ -326,7 +326,7 @@ dst_h265demo() { REPLY="-b $1"; }
 cmd_h265demo()
 {
 	local args= threads=1 res= fps= preset=6
-	while [ "$#" -gt 0 ]; do
+	while [[ "$#" -gt 0 ]]; do
 		case $1 in
 			-i|--input) 	args="$args -i $2";;
 			-o|--output) 	args="$args -b $2";;
@@ -389,7 +389,7 @@ dst_h264demo() { REPLY="Destination = $1"; }
 cmd_h264demo()
 {
 	local args= threads=1 res= bitrateKbps=2000
-	while [ "$#" -gt 0 ]; do
+	while [[ "$#" -gt 0 ]]; do
 		case $1 in
 			-i|--input) 	args="$args Source = $2";;
 			-o|--output) 	args="$args Destination = $2";;

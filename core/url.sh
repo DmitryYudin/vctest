@@ -6,7 +6,7 @@
 : ${__CURL_OPT="--connect-timeout 10 --location -k --silent --show-error"}
 DONWLOAD_BACKEND=${1-ps}
 
-if [ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]; then
+if [[ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]]; then
 
 set -eu -o pipefail
 
@@ -50,7 +50,7 @@ usage()
 
 entrypoint()
 {
-	[ "$#" == 0 ] && usage 1>&2 && return 1
+	[[ "$#" == 0 ]] && usage 1>&2 && return 1
 	local backend="" task=3
 	for arg do
 		shift
@@ -67,17 +67,17 @@ entrypoint()
 		esac
 	done
 
-	if [ $task == 1 ]; then
+	if [[ $task == 1 ]]; then
 		URL_headers "$@"
-	elif [ $task == 2 ]; then
+	elif [[ $task == 2 ]]; then
 		URL_headers_FORCE "$@"
-	elif [ $task == 3 ]; then
+	elif [[ $task == 3 ]]; then
 		URL_info "$@" --format
-	elif [ $task == 4 ]; then
+	elif [[ $task == 4 ]]; then
 		URL_download "$@"
 	else
 		local URLs=
-		if [ "$#" != 0 ]; then
+		if [[ "$#" != 0 ]]; then
 			local url_list="$1"
 			URLs=$(cat "$url_list" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/#.*//' | paste)
 			shift
@@ -95,20 +95,20 @@ entrypoint()
 
 		local wmax=0
 		if command -v tput &>/dev/null; then
-			if [ -t 1 ]; then
+			if [[ -t 1 ]]; then
 				wmax=$(tput cols)
 				wmax=$(( wmax - 63))
 			fi
 		fi
 		for url in $URLs; do
 			local url_short="$url"
-			if [ $wmax -gt 0 -a ${#url} -gt $wmax ]; then
+			if [[ $wmax -gt 0 && ${#url} -gt $wmax ]]; then
 				local tail=$(( wmax - 15 - 3))
 				url_short=${url_short#*://}
-			 	[ $tail -gt 0 ] && url_short="${url_short:0:15}...${url_short: -$tail}"
+			 	[[ $tail -gt 0 ]] && url_short="${url_short:0:15}...${url_short: -$tail}"
 			fi
 
-			if [ -n "$backend" ]; then
+			if [[ -n "$backend" ]]; then
 				x=$(URL_info "$url" "$@" --format)
 				printf "%s: %-55s %s\n" "$DONWLOAD_BACKEND" "$x" "$url_short"
 			else
@@ -129,7 +129,7 @@ __execute_script_ps()
 {
 	local context="$1"; shift
 	local script="$1"; shift
-	if [ "$context" == back ]; then
+	if [[ "$context" == back ]]; then
 		powershell -nologo -executionpolicy bypass -c "& $script "$@"" &
 		wait $!
 	else
@@ -185,7 +185,7 @@ filename_from_url() # <=> extention(basename($url)) != empty
 	local name="${url%%\?*}" 	# xxx?***
 	name="${name##*/}"  		# ***/***/xxx
 	local ext="${name##*.}" 	# ***.xxx
-	if [ "$name" != "$ext" ]; then
+	if [[ "$name" != "$ext" ]]; then
 		echo "$name"
 	else
 		return 1
@@ -196,7 +196,7 @@ URL_info()
 	local arg format=""
 	for arg do
 		shift
-		[ "$arg" == "--format" ] && format=true && continue
+		[[ "$arg" == "--format" ]] && format=true && continue
 		set -- "$@" "$arg"
 	done
 
@@ -229,14 +229,14 @@ URL_info()
 	fi
 
 	local suff="B" num=1
-	[ $len -ge       1000 ] && suff="K" &&        num=1000
-	[ $len -ge    1000000 ] && suff="M" &&     num=1000000
-	[ $len -ge 1000000000 ] && suff="G" &&  num=1000000000
+	[[ $len -ge       1000 ]] && suff="K" &&        num=1000
+	[[ $len -ge    1000000 ]] && suff="M" &&     num=1000000
+	[[ $len -ge 1000000000 ]] && suff="G" &&  num=1000000000
 	local sz=$(( len / num)).$(( (10*len / num) % 10)) # 0.0X - 999.9Y
-	[ $len == 0 ] && sz="?.?"
+	[[ $len == 0 ]] && sz="?.?"
 	sz="$sz$suff"
 
-	if [ -z "$format" ]; then
+	if [[ -z "$format" ]]; then
 		echo "$len $dis $sz"
 	else
 		printf "%6s %3s %s\n" "$sz" "$src" "$dis"
@@ -248,7 +248,7 @@ URL_info()
 ####################################
 URL_headers()
 {
-	if [ "$DONWLOAD_BACKEND" == ps ]; then
+	if [[ "$DONWLOAD_BACKEND" == ps ]]; then
 		URL_headers_ps_WebRequest "$@"
 	else
 		URL_headers_curl "$@"
@@ -256,7 +256,7 @@ URL_headers()
 }
 URL_headers_FORCE()
 {
-	if [ "$DONWLOAD_BACKEND" == ps ]; then
+	if [[ "$DONWLOAD_BACKEND" == ps ]]; then
 		URL_headers_ps_WebClient "$@"
 	else
 		URL_headers_curl_FORCE "$@"
@@ -368,7 +368,7 @@ URL_headers_ps_WebClient()
 ####################################
 URL_download()
 {
-	if [ "$DONWLOAD_BACKEND" == ps ]; then
+	if [[ "$DONWLOAD_BACKEND" == ps ]]; then
 		URL_download_ps "$@"
 	else
 		URL_download_curl "$@"
@@ -436,6 +436,6 @@ URL_download_ps()
 	__execute_script_ps back "$script2" "$url" "$dst"
 }
 
-if [ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]; then
+if [[ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]]; then
 	entrypoint "$@"
 fi

@@ -15,7 +15,7 @@ encode() {
 	done
 }
 
-if [ 1 == 1 ]; then 			# use default preset
+if [[ 1 == 1 ]]; then 			# use default preset
 	codec="ashevc";  encode "$@"
 	codec="x265";    encode "$@"
 	codec="kvazaar"  encode "$@"
