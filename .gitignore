@@ -31,3 +31,4 @@ out*/
 report/
 __pycache__
 bin/
+*.local

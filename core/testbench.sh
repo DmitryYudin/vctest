@@ -1,8 +1,13 @@
+#
+# Copyright © 2019 Dmitry Yudin. All rights reserved.
+# Licensed under the Apache License, Version 2.0
+#
 set -eu -o pipefail
 
 dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 . "$dirScript/utility_functions.sh"
 . "$dirScript/codec.sh"
+. "$dirScript/remote_target.sh"
 
 PRMS="28 34 39 44"
 REPORT=report.log
@@ -26,35 +31,37 @@ usage()
 	    $(basename $0) [opt]
 
 	Options:
-	    -h|--help     Print help.
-	    -i|--input    Input YUV files. Multiple '-i vec' allowed.
-	    -d|--dir      Output directory. Default: "$DIR_OUT"
-	    -o|--output   Report path.
-	    -c|--codec    Codecs list. Default: "$CODECS".
-	    -t|--threads  Number of threads to use
-	    -p|--prms     Bitrate (kbps) or QP list. Default: "$PRMS".
-	                  Values less than 60 considered as QP.
-	       --preset   Codec-specific list of 'preset' options (default: marked by *):
-	                  ashevc:   *1 2 3 4 5 6
-	                  x265:     *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
-	                  kvazaar:  *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
-	                  kingsoft:  ultrafast *superfast veryfast         fast medium slow        veryslow placebo
-	                  intel_sw:                       veryfast *faster fast medium slow slower veryslow
-	                  intel_hw:                       veryfast  faster fast medium slow slower veryslow
-	                  h265demo: 6 *5 4 3 2 1
-	                  h264demo: N/A
-	    -j|--ncpu     Number of encoders to run in parallel. The value of '0' will run as many encoders as many
-	                  CPUs available. Default: $NCPU
-	                  Note, execution time based profiling data (CPU consumption and FPS estimation) is not
-	                  available in parallel execution mode.
-	       --hide     Do not print legend and header
+	    -h|--help        Print help.
+	    -i|--input   <x> Input YUV files. Multiple '-i vec' allowed.
+	    -d|--dir     <x> Output directory. Default: "$DIR_OUT"
+	    -o|--output  <x> Report path.
+	    -c|--codec   <x> Codecs list. Default: "$CODECS".
+	    -t|--threads <x> Number of threads to use
+	    -p|--prms    <x> Bitrate (kbps) or QP list. Default: "$PRMS".
+	                     Values less than 60 considered as QP.
+	       --preset  <x> Codec-specific list of 'preset' options (default: marked by *):
+	                       ashevc:   *1 2 3 4 5 6
+	                       x265:     *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
+	                       kvazaar:  *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
+	                       kingsoft:  ultrafast *superfast veryfast         fast medium slow        veryslow placebo
+	                       intel_sw:                       veryfast *faster fast medium slow slower veryslow
+	                       intel_hw:                       veryfast  faster fast medium slow slower veryslow
+	                       h265demo: 6 *5 4 3 2 1
+	                       h264demo: N/A
+	    -j|--ncpu    <x> Number of encoders to run in parallel. The value of '0' will run as many encoders as many
+	                     CPUs available. Default: $NCPU
+	                     Note, execution time based profiling data (CPU consumption and FPS estimation) is not
+	                     available in parallel execution mode.
+	       --hide        Do not print legend and header.
+	       --adb         Run Android@ARM using ADB. | Credentials are read from 'remote.local' file.
 	EOF
 }
 
 entrypoint()
 {
 	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut= cmd_ncpu= cmd_endofflags=
-	local hide_banner=
+	local hide_banner= target=
+	local remote=false targetInfo=
 	while [[ "$#" -gt 0 ]]; do
 		local nargs=2
 		case $1 in
@@ -68,6 +75,7 @@ entrypoint()
 			   --pre*) 		cmd_presets=$2;;
 			-j|--ncpu)		cmd_ncpu=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
+			   --adb)       target=adb; remote=true; nargs=1;;
 			   --)			cmd_endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
@@ -82,10 +90,16 @@ entrypoint()
 	[[ -n "$cmd_prms" ]] && PRMS=$cmd_prms
 	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
 	[[ -n "$cmd_ncpu" ]] && NCPU=$cmd_ncpu
+
+	target=${target:-windows}
 	PRESETS=${PRESETS:--}
 	# for multithreaded run, run in single process to get valid cpu usage estimation
 	[[ $THREADS -gt 1 ]] && NCPU=1
 
+	if $remote; then
+		TARGET_setTarget $target remote.local
+		TARGET_getFingerprint; targetInfo=$REPLY
+	fi
 	if [[ -n "$cmd_endofflags" ]]; then
 		echo "exe: $@"
 		"$@"
@@ -95,10 +109,10 @@ entrypoint()
 	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
 
 	# Remove non-existing and set abs-path
-	vectors_verify $VECTORS; VECTORS=$REPLY
+	vectors_verify $remote $VECTORS; VECTORS=$REPLY
 
 	# Remove codecs we can't run
-	codec_verify $CODECS; CODECS=$REPLY
+	codec_verify $remote $target $CODECS; CODECS=$REPLY
 
 	local startSec=$SECONDS
 
@@ -108,7 +122,7 @@ entrypoint()
 	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS" "$PRESETS"
 
 	local optionsFile=options.txt
-	prepare_optionsFile "$optionsFile"
+	prepare_optionsFile $target "$optionsFile"
 
 	local encodeList= decodeList= parseList= reportList=
 	while read info; do
@@ -122,7 +136,8 @@ entrypoint()
 		if [[ ! -f "$outputDir/encoded.ts" ]]; then
 			encode=true
 		elif [[ $NCPU -eq 1 && ! -f "$outputDir/cpu.log" ]]; then
-			encode=true  # update CPU log
+			# cpu load monitoring is currently disabled for a remote run
+			! $remote && encode=true  # update CPU log
 		fi
 		if $encode; then
 			# clean up target directory if we need to start from a scratch
@@ -159,7 +174,7 @@ entrypoint()
 	progress_begin "[2/5] Encoding..." "$encodeList"
 	if [[ -n "$encodeList" ]]; then
 		for outputDirRel in $encodeList; do
-			echo "$self --ncpu $NCPU -- encode_single_file \"$outputDirRel\""
+			echo "$self --ncpu $NCPU -- encode_single_file $remote \"$outputDirRel\""
 		done > $testplan
 		execute_plan $testplan $NCPU
 	fi
@@ -196,11 +211,14 @@ entrypoint()
 	#
 	# Reporting
 	#
+	local info=$target
+	$remote && info="$info [remote]" || info="$info [local]"
+	[[ -n "$targetInfo" ]] && info="$info [$targetInfo]"
 	progress_begin "[5/5] Reporting..."	"$reportList"
 	if [[ -z "$hide_banner" ]]; then
 		readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-		echo "$timestamp" >> $REPORT
-		echo "$timestamp" >> $REPORT_KW
+		echo "$timestamp $info" >> $REPORT
+		echo "$timestamp $info" >> $REPORT_KW
 
 		output_legend
 		output_header
@@ -213,11 +231,12 @@ entrypoint()
 
 	local duration=$(( SECONDS - startSec ))
 	duration=$(date +%H:%M:%S -u -d @${duration})
-	print_console "$duration >>>> $REPORT\n"
+	print_console "$duration >>>> $REPORT $info\n"
 }
 
 vectors_verify()
 {
+	local remote=$1; shift
 	local VECTORS="$*" vec= removeList=
 
 	for vec in $VECTORS; do
@@ -237,11 +256,21 @@ vectors_verify()
 		VECTORS_ABS="$VECTORS_ABS $(realpath "$vec")"
 	done
 
+	if $remote; then
+		local remoteDirVec
+		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
+		echo "Push vectors to remote machine $remoteDirVec ..."
+		for vec in $VECTORS_ABS; do
+			TARGET_pushFileOnce "$(ospath $vec)" $remoteDirVec/${vec##*/}
+		done
+	fi
+
 	REPLY=$VECTORS_ABS
 }
 
 prepare_optionsFile()
 {
+	local target=$1; shift
 	local optionsFile=$1; shift
 
 	local prm= src= codecId= preset= infoTmpFile=$(mktemp)
@@ -267,8 +296,8 @@ prepare_optionsFile()
 		[[ $preset == '-' ]] || args="$args --preset $preset"
 
 		local encExe= encExeHash= encCmdArgs= encCmdHash=
-		codec_exe $codecId; encExe=$REPLY
-		codec_hash $codecId; encExeHash=$REPLY
+		codec_exe $codecId $target; encExe=$REPLY
+		codec_hash $codecId $target; encExeHash=$REPLY
 		codec_cmdArgs $codecId $args; encCmdArgs=$REPLY
 
 		local SRC=${src//\\/}; SRC=${SRC##*[/\\]} # basename only
@@ -314,7 +343,7 @@ start_cpu_monitor()
 	local cpuLog=$1; shift
 
 	local encExe=
-	codec_exe $codecId; encExe=$REPLY
+	codec_exe $codecId windows; encExe=$REPLY
 
 	local name=$(basename "$encExe"); name=${name%.*}
 
@@ -506,6 +535,7 @@ report_single_file()
 
 encode_single_file()
 {
+	local remote=$1; shift
 	local outputDirRel=$1; shift
 	local outputDir="$DIR_OUT/$outputDirRel"
 	pushd "$outputDir"
@@ -519,6 +549,17 @@ encode_single_file()
 	dict_getValue "$info" dst; dst=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
+	if $remote; then
+		local remoteDirBin= remoteExe=
+		local remoteDirVec= remoteSrc=
+		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
+		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
+		remoteExe=$remoteDirBin/${encExe##*/}
+		remoteSrc=$remoteDirVec/${src##*/}
+
+		encExe=$remoteExe
+		src=$remoteSrc
+	fi
 	codec_cmdSrc $codecId "$src"; encCmdSrc=$REPLY
 	codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
 
@@ -532,40 +573,88 @@ encode_single_file()
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
 
-	# temporary hack, for backward compatibility (remove later)
-	[[ $codecId == h265demo ]] && echo "" > h265demo.cfg
+	if ! $remote; then
+		# temporary hack, for backward compatibility (remove later)
+		[[ $codecId == h265demo ]] && echo "" > h265demo.cfg
 
-	# Make estimates only if one instance of the encoder is running at a time
-	local estimate_execution_time=false
-	if [[ $NCPU == 1 ]]; then
-		estimate_execution_time=true
+		# Make estimates only if one instance of the encoder is running at a time
+		local estimate_execution_time=false
+		if [[ $NCPU == 1 ]]; then
+			estimate_execution_time=true
+		fi
+
+		if $estimate_execution_time; then
+			# Start CPU monitor
+			trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
+			start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
+		fi
+
+		# Encode
+		local consumedNsec=$(date +%s%3N) # seconds*1000
+		if ! { echo "yes" | $cmd; } 1>$stdoutLog 2>&1 || [ ! -f "$dst" ]; then
+			echo "" # newline if stderr==tty
+			cat "$stdoutLog" >&2
+			error_exit "encoding error, see logs above"
+		fi
+		consumedNsec=$(( $(date +%s%3N) - consumedNsec ))
+
+		if $estimate_execution_time; then
+			local fps=0
+			[[ $consumedNsec != 0 ]] && fps=$(( 1000*srcNumFr/consumedNsec ))
+			echo "$fps" > $fpsLog
+
+			# Stop CPU monitor
+			stop_cpu_monitor
+			trap -- EXIT
+		fi
+	else
+		local remoteDirOut remoteOutputDir
+		TARGET_getDataDir; remoteDirOut=$REPLY/vctest/out
+		remoteOutputDir=$remoteDirOut/$outputDirRel
+
+		TARGET_exec "
+			rm -rf $remoteOutputDir && mkdir -p $remoteOutputDir && cd $remoteOutputDir
+
+			# temporary hack, for backward compatibility (remove later)
+			[ $codecId == h265demo ] && echo \"\" > h265demo.cfg
+#
+# Disabled for a while to run encoder in foreground
+#
+#			start_cpu_monitor() {
+#				local worker_pid=\$1; shift
+#				{ while ps -o '%cpu=,cpu=' -p \$worker_pid >> $cpuLog; do sleep .5s; done; } &
+#				PERF_ID=\$!
+#			}
+#			stop_cpu_monitor() {
+#				echo \"waiting CPU monitor with pid=\$PERF_ID to stop\"
+#				kill \$PERF_ID && wait \$PERF_ID || true
+#				echo \"CPU monitor stopped\"
+#			}
+#			consumedSec=\$(date +%s)
+#			$cmd </dev/null 1>$stdoutLog 2>&1 &
+#			pid=\$!
+#			start_cpu_monitor \$pid
+#			error_code=0
+#			wait \$pid || error_code=\$?
+#  			consumedSec=\$(( \$(date +%s) - consumedSec ))
+#			stop_cpu_monitor
+
+			consumedSec=\$(date +%s)
+			$cmd </dev/null 1>$stdoutLog 2>&1
+			error_code=0
+  			consumedSec=\$(( \$(date +%s) - consumedSec ))
+
+			[ \$consumedSec != 0 ] && fps=\$(( $srcNumFr/consumedSec ))
+			if [ \$error_code != 0 -o ! -f $dst ]; then
+				echo "" # newline if stderr==tty
+				cat $stdoutLog >&2
+				return 1
+			fi
+			echo "\$fps" > $fpsLog
+		"
+		TARGET_pull $remoteOutputDir/. .
+		TARGET_exec "rm -rf $remoteOutputDir"
 	fi
-
-	if $estimate_execution_time; then
-		# Start CPU monitor
-		trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
-		start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
-	fi
-
-	# Encode
-	local consumedSec=$(date +%s%3N) # seconds*1000
-	if ! { echo "yes" | $cmd; } 1>>$stdoutLog 2>&1 || [ ! -f "$dst" ]; then
-		echo "" # newline if stderr==tty
-		cat "$stdoutLog" >&2
-		error_exit "encoding error, see logs above"
-	fi
-	consumedSec=$(( $(date +%s%3N) - consumedSec ))
-
-	if $estimate_execution_time; then
-		local fps=0
-		[[ $consumedSec != 0 ]] && fps=$(( 1000*srcNumFr/consumedSec ))
-		echo "$fps" > $fpsLog
-
-		# Stop CPU monitor
-		stop_cpu_monitor
-		trap -- EXIT
-	fi
-
 	date "+%Y.%m.%d-%H.%M.%S" > encoded.ts
 
 	popd
@@ -772,8 +861,9 @@ parse_cpuLog()
 		cat "$log" | tail -n +3 | cut -d, -f 2 | tr -d \" | 
 				awk '{ if ( $1 != "" && $1 > 0 ) { sum += $1; cnt++; } } END { print cnt !=0 ? sum / cnt : 0 }'
 	else
-		# TODO: posix compatible monitor
-		:
+		 # expect '%cpu' is a first column delimited by ' '
+		cat "$log" | cut -d' ' -f 1 | tr -d \" | 
+				awk '{ if ( $1 != "" && $1 > 0 ) { sum += $1; cnt++; } } END { print cnt !=0 ? sum / cnt : 0 }'
 	fi
 }
 

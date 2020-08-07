@@ -4,8 +4,8 @@
 # All exported functions are prefixed with "codec_".
 #
 # 	codec_default_preset (id) - 'preset' option value we consider as the default
-#   codec_exe (id)            - path to executable module
-#	codec_hash(id)            - HASH
+#   codec_exe (id, target)    - path to executable module for a 'target' device
+#	codec_hash(id, target)    - HASH
 #	codec_cmdArgs(id, args)   - convert unified arguments to codec specific command line
 #	codec_cmdHash(id, args)   - arguments HASH
 #	codec_cmdSrc(id, src)     - set input file name
@@ -20,6 +20,10 @@ windows_kingsoft="$dirBinWindows/kingsoft/AppEncoder_x64.exe"
 windows_intel="$dirBinWindows/intel/sample_encode.exe"
 windows_h265demo="$dirBinWindows/hw265/h265EncDemo.exe"
 windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
+
+dirBinAndroid="$dirScript/../bin/android"
+android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
+android_h265demo="$dirBinAndroid/hw265/h265demo"
 
 codec_default_preset()
 {
@@ -41,30 +45,34 @@ codec_default_preset()
 }
 codec_exe()
 {
-	local codecId=$1 encoderExe=
+	local codecId=$1; shift
+	local target=$1; shift
+	local encoderExe=
 
-	eval "local cachedVal=\${CACHE_path_${codecId}:-}"
+	eval "local cachedVal=\${CACHE_path_${codecId}_${target}:-}"
 	if [[ -n "$cachedVal" ]]; then
 		encoderExe=$cachedVal
 	else
-		exe_${codecId}; encoderExe=$REPLY
+		exe_${codecId} $target; encoderExe=$REPLY
 		[[ -f "$encoderExe" ]] || error_exit "encoder does not exist '$encoderExe'"
 		encoderExe=$(realpath "$encoderExe")
-		eval "CACHE_path_${codecId}=$encoderExe"
+		eval "CACHE_path_${codecId}_${target}=$encoderExe"
 	fi
 
 	REPLY=$encoderExe
 }
 codec_hash()
 {
-	local codecId=$1 hash=
+	local codecId=$1; shift
+	local target=$1; shift
+	local hash=
 
 	eval "local cachedVal=\${CACHE_hash_${codecId}:-}"
 	if [[ -n "$cachedVal" ]]; then
 		hash=$cachedVal
 	else
 		local encoderExe
-		codec_exe $codecId; encoderExe=$REPLY
+		codec_exe $codecId $target; encoderExe=$REPLY
 		hash=$(md5sum ${encoderExe//\\//})
 		hash=${hash% *}
 		hash=${codecId}_${hash::8}
@@ -101,34 +109,38 @@ codec_cmdDst()
 }
 codec_verify()
 {
+	local remote=$1; shift
+	local target=$1; shift
 	local CODECS="$*" codecId= cmd= removeList=
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
 
 	for codecId in $CODECS; do
-		exe_${codecId}; encoderExe=$REPLY
+		exe_${codecId} $target; encoderExe=$REPLY
+
 		if ! [[ -f "$encoderExe" ]]; then
 			echo "warning: can't find executable. Remove '$codecId' from a list."
 			removeList="$removeList $codecId"
 			continue
 		fi
+		if ! $remote; then
+			local cmd=$encoderExe
+			# temporary hack, for backward compatibility (remove later)
+			if [[ $codecId == h265demo ]]; then
+				echo "" > $dirOut/h265demo.cfg
+				cmd="$cmd -c $(ospath "$dirOut/h265demo.cfg")"
+			fi
+			codec_cmdArgs $codecId --res 160x96 --fps 30; cmd="$cmd $REPLY"
+			codec_cmdSrc $codecId "$0"; cmd="$cmd $REPLY"
+			codec_cmdDst $codecId "$dirOut/out.tmp"; cmd="$cmd $REPLY"
 
-		local cmd=$encoderExe
-		# temporary hack, for backward compatibility (remove later)
-		if [[ $codecId == h265demo ]]; then
-			echo "" > $dirOut/h265demo.cfg
-			cmd="$cmd -c $(ospath "$dirOut/h265demo.cfg")"
+			if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
+				echo "warning: encoding error. Remove '$codecId' from a list." >&2;
+				removeList="$removeList $codecId"
+			fi
+			rm -f "$dirOut/out.tmp"
 		fi
-		codec_cmdArgs $codecId --res 160x96 --fps 30; cmd="$cmd $REPLY"
-		codec_cmdSrc $codecId "$0"; cmd="$cmd $REPLY"
-		codec_cmdDst $codecId "$dirOut/out.tmp"; cmd="$cmd $REPLY"
-
-		if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
-			echo "warning: encoding error. Remove '$codecId' from a list." >&2;
-			removeList="$removeList $codecId"
-		fi
-		rm -f "$dirOut/out.tmp"
 	done
 
 	rm -rf -- "$dirOut"
@@ -137,10 +149,23 @@ codec_verify()
 	for codecId in $removeList; do
 		CODECS=$(echo "$CODECS" | sed "s/$codecId//")
 	done
+
+	if $remote; then
+		# Push executable (folder content) on a target device
+		local remoteDirBin
+		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
+		echo "Push codecs to remote machine $remoteDirBin ..."
+		for codecId in $CODECS; do
+			exe_${codecId} $target; encoderExe=$REPLY
+			encoderExe=$(ospath $encoderExe)
+			TARGET_push "$(dirname $encoderExe)/." $remoteDirBin
+			TARGET_exec "chmod +x $remoteDirBin/$(basename $encoderExe)"
+	    done
+	fi
 	REPLY=$CODECS
 }
 
-exe_x265() { REPLY=$x265EncoderExe; }
+exe_x265() { REPLY=; [[ $1 == windows ]] && REPLY=$windows_x265; return 0; }
 src_x265() { REPLY="--input $1"; }
 dst_x265() { REPLY="--output $1"; }
 cmd_x265()
@@ -173,7 +198,7 @@ cmd_x265()
 	REPLY=$args
 }
 
-exe_ashevc() { REPLY=$ashevcEncoderExe; }
+exe_ashevc() { REPLY=; [[ $1 == windows ]] && REPLY=$windows_ashevc; return 0; }
 src_ashevc() { REPLY="--input $1"; }
 dst_ashevc() { REPLY="--output $1"; }
 cmd_ashevc()
@@ -211,7 +236,7 @@ cmd_ashevc()
 	REPLY=$args
 }
 
-exe_kvazaar() { REPLY=$kvazaarEncoderExe; }
+exe_kvazaar() { REPLY=; [[ $1 == windows ]] && REPLY=$windows_kvazaar; return 0; }
 src_kvazaar() { REPLY="--input $1"; }
 dst_kvazaar() { REPLY="--output $1"; }
 cmd_kvazaar()
@@ -241,7 +266,11 @@ cmd_kvazaar()
 	REPLY=$args
 }
 
-exe_kingsoft() { REPLY=$kingsoftEncoderExe; }
+exe_kingsoft() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_kingsoft;
+				 [[ $1 == adb     ]] && REPLY=$android_kingsoft;
+				 return 0;
+}
 src_kingsoft() { REPLY="-i $1"; }
 dst_kingsoft() { REPLY="-b $1"; }
 cmd_kingsoft()
@@ -310,17 +339,21 @@ cmd_intel()
 	REPLY="h265 $args"
 }
 
-exe_intel_sw() { REPLY=$intelEncoderExe; }
+exe_intel_sw() { REPLY=; [[ $1 == windows ]] && REPLY=$windows_intel; return 0; }
 src_intel_sw() { REPLY="-i $1"; }
 dst_intel_sw() { REPLY="-o $1"; }
 cmd_intel_sw() { cmd_intel "$@"; REPLY="$REPLY -sw"; }
 
-exe_intel_hw() { REPLY=$intelEncoderExe; }
+exe_intel_hw() { REPLY=; [[ $1 == windows ]] && REPLY=$windows_intel; return 0; }
 src_intel_hw() { REPLY="-i $1"; }
 dst_intel_hw() { REPLY="-o $1"; }
 cmd_intel_hw() { cmd_intel "$@"; REPLY="$REPLY -hw"; }
 
-exe_h265demo() { REPLY=$h265EncDemoExe; }
+exe_h265demo() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_h265demo;
+				 [[ $1 == adb     ]] && REPLY=$android_h265demo;
+				 return 0;
+}
 src_h265demo() { REPLY="-i $1"; }
 dst_h265demo() { REPLY="-b $1"; }
 cmd_h265demo()
@@ -383,7 +416,7 @@ cmd_h265demo()
 	REPLY=$args
 }
 
-exe_h264demo() { REPLY=$HW264_Encoder_DemoExe; }
+exe_h264demo() { REPLY=; [[ $1 == windows ]] && REPLY=$windows_h264demo; return 0; }
 src_h264demo() { REPLY="Source = $1"; }
 dst_h264demo() { REPLY="Destination = $1"; }
 cmd_h264demo()
