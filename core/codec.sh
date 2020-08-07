@@ -23,10 +23,12 @@ windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
 
 dirBinAndroid="$dirScript/../bin/android"
 android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
+android_ks="$dirBinAndroid/ks/ks_encoder"
 android_h265demo="$dirBinAndroid/hw265/h265demo"
 
 dirBinLinuxARM="$dirScript/../bin/linux-arm"
 linux_arm_h265demo="$dirBinLinuxARM/hw265/h265demo"
+linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
 
 codec_default_preset()
 {
@@ -38,6 +40,7 @@ codec_default_preset()
 		x265) 		preset=ultrafast;;
 		kvazaar) 	preset=ultrafast;;
 		kingsoft)	preset=superfast;;
+		ks)			preset=superfast;;
 		intel_*)	preset=faster;;
 		h265demo)	preset=5;;
 		h264demo)	preset=-;;
@@ -299,6 +302,45 @@ cmd_kingsoft()
 
 	args="$args -threads $threads"
 	args="$args -ref 1 -ref0 1"     # Num reference frames
+	args="$args -lookahead 0"
+	args="$args -bframes 0"			# Disable B-frames
+	args="$args -iper -1"         	# Only first picture is intra.
+#	args="$args -fpp 1" 			# TODO: enable frame level parallel
+
+	REPLY=$args
+}
+
+exe_ks() { REPLY=;
+				 [[ $1 == adb ]] && REPLY=$android_ks;
+				 [[ $1 == ssh ]] && REPLY=$linux_arm_ks;
+				 return 0;
+}
+src_ks() { REPLY="-i $1"; }
+dst_ks() { REPLY="-b $1"; }
+cmd_ks()
+{
+	local args= threads=1 res=
+	while [ "$#" -gt 0 ]; do
+		case $1 in
+			-i|--input) 	args="$args -i $2";;
+			-o|--output) 	args="$args -b $2";;
+			   --res) 		res=$2;;
+			   --fps) 		args="$args -fr $2";;
+			   --preset) 	args="$args -preset $2";; # ultrafast, superfast, veryfast, fast, medium, slow, veryslow, placebo
+			   --qp)     	args="$args -qp $2 -qpmin $2 -qpmax $2";; # valid when RCType != 0, (maybe -fixqp ?)
+			   --bitrate)   args="$args -br $2";;
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+	local width=${res%%x*}
+	local height=${res##*x}
+	args="$args -wdt $width"
+	args="$args -hgt $height"
+
+	args="$args -threads $threads"
+	args="$args -refnum 1 -ref0 1"     # Num reference frames
 	args="$args -lookahead 0"
 	args="$args -bframes 0"			# Disable B-frames
 	args="$args -iper -1"         	# Only first picture is intra.
