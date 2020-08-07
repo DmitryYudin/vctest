@@ -12,7 +12,7 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 PRMS="28 34 39 44"
 REPORT=report.log
 REPORT_KW=${REPORT%.*}.kw
-CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
+CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h264demo"
 PRESETS=
 THREADS=1
 VECTORS="
@@ -46,6 +46,7 @@ usage()
 	                       x265:     *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
 	                       kvazaar:  *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
 	                       kingsoft:  ultrafast *superfast veryfast         fast medium slow        veryslow placebo
+	                       ks:        ultrafast *superfast veryfast         fast medium slow        veryslow placebo
 	                       intel_sw:                       veryfast *faster fast medium slow slower veryslow
 	                       intel_hw:                       veryfast  faster fast medium slow slower veryslow
 	                       h265demo: 6 *5 4 3 2 1
@@ -887,6 +888,9 @@ parse_stdoutLog()
 		kingsoft)
 			fps=$(cat "$log" | grep 'test time: ' | tr -s ' ' | cut -d' ' -f 8)
 			#fps=$(cat "$log" | grep 'pure encoding time:' | head -n 1 | tr -s ' ' | cut -d' ' -f 8)
+		;;
+		ks)
+			fps=$(cat "$log" | grep 'FPS: ' | tr -s ' ' | cut -d' ' -f 2)
 		;;
 		intel_*)
 			fps=$(cat "$log" | grep 'Encoding fps:' | tr -s ' ' | cut -d' ' -f 3)
