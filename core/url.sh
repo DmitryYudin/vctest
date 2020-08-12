@@ -386,6 +386,26 @@ URL_download_ps()
 {
 	local url="$1"; shift
 	local dst="$1"; shift
+	local script_show_proxy=$(cat <<-'SCRIPT'
+            try {
+				$progressPreference = 'silentlyContinue' 
+				$ErrorActionPreference = 'Stop';
+				$proxy = [System.Net.WebRequest]::GetSystemWebProxy();
+				if ($proxy) {
+					$proxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials;
+					$proxyUrl = $proxy.GetProxy("google.com");
+					if ($proxyUrl) {
+    	        		Write-Host "proxy: $proxyUrl";
+					}
+				}
+			} catch {
+				Write-Output $_;
+				exit 1
+			}
+		}
+		SCRIPT
+	)
+
 	local script=$(cat <<-'SCRIPT'
 		{   # This does wrong things on double redirect: https://sourceforge.net/projects/sevenzip/files/7-Zip/19.00/7z1900.msi
 			#
@@ -396,16 +416,14 @@ URL_download_ps()
 				$progressPreference = 'silentlyContinue' 
 				$ErrorActionPreference = 'Stop';
 				$proxy = [System.Net.WebRequest]::GetSystemWebProxy();
-				$proxyUri=
-				if ($proxy) {
-					$proxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials;
-					$proxyUri = $proxy.GetProxy("$url");
-				}
-				if ($proxyUrl) {
-					Invoke-WebRequest -Uri $url -OutFile $dst -ProxyUseDefaultCredentials \
-						-UseDefaultCredentials -Proxy "$proxyUri" -ProxyUseDefaultCredentials;
-				} else {
+				if ($proxy.IsBypassed($url)) {
 					Invoke-WebRequest -Uri $url -OutFile $dst;
+				} else {
+					$proxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials;
+					$proxyUrl = $proxy.GetProxy("$url");
+            		Write-Host "using proxy: $proxyUrl";
+					Invoke-WebRequest -Uri $url -OutFile $dst -UseDefaultCredentials \
+						-Proxy "$proxyUrl" -ProxyUseDefaultCredentials;
 				}
 			} catch {
 				Write-Output $_;
@@ -417,6 +435,7 @@ URL_download_ps()
 	# this hangs user script but known work with proxy well
 	# 40Mb of 51Mb downloaded : http://repo.msys2.org/distrib/msys2-x86_64-latest.tar.xz
 	# with an exit code of '0' - do not know what to do !!!
+	# Can't handle redirect.
 	local script2=$(cat <<-'SCRIPT'
 		{
 	    	Param([Uri] $url, $dst)
@@ -432,8 +451,13 @@ URL_download_ps()
 		}
 		SCRIPT
 	)
-	# __execute_script_ps front "$script" "$url" "$dst"
-	__execute_script_ps back "$script2" "$url" "$dst"
+
+	if [[ ${SHOW_PROXY-:0} == 0 ]]; then
+		__execute_script_ps front "$script_show_proxy"
+		export SHOW_PROXY=1
+	fi
+	__execute_script_ps front "$script" "$url" "$dst"
+	#__execute_script_ps back "$script2" "$url" "$dst"
 }
 
 if [[ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]]; then
