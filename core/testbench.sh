@@ -12,7 +12,7 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 PRMS="28 34 39 44"
 REPORT=report.log
 REPORT_KW=${REPORT%.*}.kw
-CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h264demo"
+CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo"
 PRESETS=
 THREADS=1
 VECTORS="
@@ -50,6 +50,7 @@ usage()
 	                       intel_sw:                       veryfast *faster fast medium slow slower veryslow
 	                       intel_hw:                       veryfast  faster fast medium slow slower veryslow
 	                       h265demo: 6 *5 4 3 2 1
+	                       h265demo_v2: 6 *5   3 2
 	                       h264demo: N/A
 	    -j|--ncpu    <x> Number of encoders to run in parallel. The value of '0' will run as many encoders as many
 	                     CPUs available. Default: $NCPU
@@ -390,7 +391,7 @@ progress_begin()
 	if [[ $PROGRESS_CNT_TOT == 0 ]]; then
 		print_console "No tasks to execute\n\n"
 	else
-		printf 	-v str "%8s %4s %-8s %11s %5s %2s %6s" "Time" $PROGRESS_CNT_TOT codecId resolution '#frm' QP BR 
+		printf 	-v str "%8s %4s %-11s %11s %5s %2s %6s" "Time" $PROGRESS_CNT_TOT codecId resolution '#frm' QP BR 
 		printf 	-v str "%s %9s %2s %-16s %-8s %s" "$str" PRESET TH CMD-HASH ENC-HASH SRC
 		PROGRESS_HDR=$str
 	fi
@@ -423,7 +424,7 @@ progress_next()
 	dict_getValue "$info" encExeHash ; ENC=$REPLY  ; ENC=${ENC##*_}
 
 	local str=
-	printf 	-v str "%4s %-8s %11s %5s %2s %6s" 	"$PROGRESS_CNT" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
+	printf 	-v str "%4s %-11s %11s %5s %2s %6s" 	"$PROGRESS_CNT" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
 	printf 	-v str "%s %9s %2s %-16s %-8s %s"    "$str" "$PRESET" "$TH" "$HASH" "$ENC" "$SRC"
 	PROGRESS_INFO=$str # backup
 
@@ -450,7 +451,7 @@ output_header()
 	printf 	-v str    "%6s %8s %5s %5s"                extFPS intFPS cpu% kbps
 	printf 	-v str "%s %3s %7s %6s %4s"         "$str" '#I' avg-I avg-P peak 
 	printf 	-v str "%s %6s %6s %6s %6s"         "$str" gPSNR psnr-I psnr-P gSSIM
-	printf 	-v str "%s %-8s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
+	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
 	printf 	-v str "%s %9s %2s %-16s %-8s %s" 	"$str" PRESET TH CMD-HASH ENC-HASH SRC
 
 #	print_console "$str\n"
@@ -517,7 +518,7 @@ output_report()
 	printf 	-v str    "%6s %8.3f %5s %5.0f"            "$extFPS" "$intFPS" "$cpu" "$kbps"
 	printf 	-v str "%s %3d %7.0f %6.0f %4.1f"   "$str" "$numI" "$avgI" "$avgP" "$peak"
 	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f" "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
-	printf 	-v str "%s %-8s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
+	printf 	-v str "%s %-11s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
 	printf 	-v str "%s %9s %2s %-16s %-8s %s" 	"$str" "$PRESET" "$TH" "$HASH" "$ENC" "$SRC"
 
 #	print_console "$str\n"
@@ -897,6 +898,10 @@ parse_stdoutLog()
 		;;
 		h265demo)
 			fps=$(cat "$log" | grep 'TotalFps:' | tr -s ' ' | cut -d' ' -f 5)
+		;;
+		h265demo_v2)
+			fps=$(cat "$log" | grep 'Encode speed:' | tr -s ' ' | cut -d' ' -f 9)
+			fps=${fps%%fps}
 		;;
 		h264demo)
 			fps=$(cat "$log" | grep 'Tests completed' | tr -s ' ' | cut -d' ' -f 1)
