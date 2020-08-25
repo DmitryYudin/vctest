@@ -26,11 +26,13 @@ dirBinAndroid="$dirScript/../bin/android"
 android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
 android_ks="$dirBinAndroid/ks/ks_encoder"
 android_h265demo="$dirBinAndroid/hw265/h265demo"
+android_x265="$dirBinAndroid/x265/x265"
 
 dirBinLinuxARM="$dirScript/../bin/linux-arm"
 linux_arm_h265demo="$dirBinLinuxARM/hw265/h265demo"
 linux_arm_h265demo_v2="$dirBinLinuxARM/hw265_v2/hw265app"
 linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
+linux_arm_x265="$dirBinLinuxARM/x265/x265"
 
 codec_default_preset()
 {
@@ -177,7 +179,12 @@ codec_verify()
 	REPLY=$CODECS
 }
 
-exe_x265() { REPLY=; [[ $1 == windows ]] && REPLY=$windows_x265; return 0; }
+exe_x265() { REPLY=;
+			 [[ $1 == windows ]] && REPLY=$windows_x265;
+			 [[ $1 == adb     ]] && REPLY=$android_x265;
+			 [[ $1 == ssh     ]] && REPLY=$linux_arm_x265;
+			 return 0;
+}
 src_x265() { REPLY="--input $1"; }
 dst_x265() { REPLY="--output $1"; }
 cmd_x265()
