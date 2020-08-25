@@ -19,6 +19,7 @@ windows_kvazaar="$dirBinWindows/kvazaar/kvazaar.exe"
 windows_kingsoft="$dirBinWindows/kingsoft/AppEncoder_x64.exe"
 windows_intel="$dirBinWindows/intel/sample_encode.exe"
 windows_h265demo="$dirBinWindows/hw265/h265EncDemo.exe"
+windows_h265demo_v2="$dirBinWindows/hw265_v2/hw265app.exe"
 windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
 
 dirBinAndroid="$dirScript/../bin/android"
@@ -43,6 +44,7 @@ codec_default_preset()
 		ks)			preset=superfast;;
 		intel_*)	preset=faster;;
 		h265demo)	preset=5;;
+		h265demo_v2)preset=5;; # 2,3,5,6
 		h264demo)	preset=-;;
 		*) error_exit "unknown encoder: $codecId";;
 	esac
@@ -458,6 +460,45 @@ cmd_h265demo()
 	args="$args -frames 9999"		# FramesToBeEncoded
 	args="$args -fixsendyuv 0"		# FixTimeSendYUV
 
+	REPLY=$args
+}
+
+exe_h265demo_v2() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_h265demo_v2;
+				 return 0;
+}
+src_h265demo_v2() { REPLY="-i $1"; }
+dst_h265demo_v2() { REPLY="-b $1"; }
+cmd_h265demo_v2()
+{
+	local args= threads=1 res= fps= preset=6
+	while [[ "$#" -gt 0 ]]; do
+		case $1 in
+			-i|--input) 	args="$args -i $2";;
+			-o|--output) 	args="$args -b $2";;
+			   --res) 		res=$2;;
+			   --fps) 		fps=$2;;
+			   --preset) 	preset=$2;; # 2,3,5,6 <-> slow -> fast (default: 3)_
+			   --qp)     	args="$args --rc 0 --qp $2";;
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+	local width=${res%%x*}
+	local height=${res##*x}
+	args="$args -w $width"
+	args="$args -h $height"
+	args="$args --frames 9999"
+	args="$args --channel 0"
+	args="$args --fps $fps"
+	args="$args --keyInt 500"
+	args="$args --bframes 0"
+	args="$args --bframe_ref 1"
+	args="$args --frame_threads 1"
+	args="$args --wpp_threads $threads"
+	args="$args --profile 0"
+	args="$args --qualityset $preset"
 	REPLY=$args
 }
 
