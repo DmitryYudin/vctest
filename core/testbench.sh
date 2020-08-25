@@ -23,6 +23,8 @@ DIR_OUT='out'
 NCPU=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
+readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
+readonly dirTmp=tmp/$timestamp
 
 usage()
 {
@@ -168,7 +170,8 @@ entrypoint()
 	local self
 	relative_path "$0"; self=$REPLY # just to make output look nicely
 
-	local testplan=testplan.txt
+    mkdir -p $dirTmp
+	local testplan=$dirTmp/testplan.txt
 
 	#
 	# Encoding
@@ -218,7 +221,6 @@ entrypoint()
 	[[ -n "$targetInfo" ]] && info="$info [$targetInfo]"
 	progress_begin "[5/5] Reporting..."	"$reportList"
 	if [[ -z "$hide_banner" ]]; then
-		readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 		echo "$timestamp $info" >> $REPORT
 		echo "$timestamp $info" >> $REPORT_KW
 
@@ -336,7 +338,7 @@ execute_plan()
 {
 	local testplan=$1; shift
 	local ncpu=$1; shift
-	"$dirScript/rpte2.sh" $testplan -p tmp -j $ncpu
+	"$dirScript/rpte2.sh" $testplan -p $dirTmp -j $ncpu
 }
 
 PERF_ID=

@@ -484,8 +484,8 @@ jobsRunTasks()
 		{ jobsReportProgress; echo ""; }
 	}
 
-	readonly __jobsStatusPipe="$tempPath/pipe_status"
-	readonly __jobsWorkPipe="$tempPath/pipe_work"
+	readonly __jobsStatusPipe="$tempPath/pipe_status.$$"
+	readonly __jobsWorkPipe="$tempPath/pipe_work.$$"
 	__jobsPid=
 
 	rm -f -- $__jobsStatusPipe $__jobsWorkPipe
