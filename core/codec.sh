@@ -114,7 +114,7 @@ codec_verify()
 {
 	local remote=$1; shift
 	local target=$1; shift
-	local CODECS="$*" codecId= cmd= removeList=
+	local CODECS="$*" codecId= cmd= codecList=
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
@@ -122,9 +122,10 @@ codec_verify()
 	for codecId in $CODECS; do
 		exe_${codecId} $target; encoderExe=$REPLY
 
-		if ! [[ -f "$encoderExe" ]]; then
+		if [[ -f "$encoderExe" ]]; then
+			codecList="$codecList $codecId"
+		else
 			echo "warning: can't find executable. Remove '$codecId' from a list."
-			removeList="$removeList $codecId"
 			continue
 		fi
 		if ! $remote; then
@@ -145,13 +146,10 @@ codec_verify()
 			rm -f "$dirOut/out.tmp"
 		fi
 	done
+	CODECS=${codecList# }
 
 	rm -rf -- "$dirOut"
 	trap -- EXIT
-
-	for codecId in $removeList; do
-		CODECS=$(echo "$CODECS" | sed "s/$codecId//")
-	done
 
 	if $remote; then
 		# Push executable (folder content) on a target device

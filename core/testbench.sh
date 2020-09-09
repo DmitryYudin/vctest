@@ -241,19 +241,16 @@ entrypoint()
 vectors_verify()
 {
 	local remote=$1; shift
-	local VECTORS="$*" vec= removeList=
+	local VECTORS="$*" vec= vecList=
 
 	for vec in $VECTORS; do
-		if ! [[ -f "$vec" ]]; then
+		if [[ -f "$vec" ]]; then
+			vecList="$vecList $vec"
+		else
 			echo "warning: can't find vector. Remove '$vec' from a list."
-			removeList="$removeList $vec"
-			continue
 		fi
 	done
-
-	for vec in $removeList; do
-		VECTORS=$(echo "$VECTORS" | sed "s/$vec//")
-	done
+	VECTORS=${vecList# }
 
 	local VECTORS_ABS=
 	for vec in $VECTORS; do
