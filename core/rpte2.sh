@@ -180,6 +180,9 @@ jobsStartWorker()
 	local -
 	set -eu
 
+	local workerLog=$tempPath/$BASHPID.worker.log
+	rm -f "$workerLog"
+
 	local id=$1; shift
 	local cmd=$1; shift
 	local userText=$1; shift
@@ -190,7 +193,18 @@ jobsStartWorker()
 	onWorkerExit() {
 		local error_code=0
 		[[ -n "$runningTaskId" ]] && error_code=1
-		echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"$ARG_DELIM > $__jobsStatusPipe
+
+		echo "Try exit with error_code=$error_code">>"$workerLog"
+		# open pipe first to avoid 'echo: write error: Broken pipe' message
+		while ! exec 3>$__jobsStatusPipe; do
+			[[ ! -e $__jobsStatusPipe ]] && echo "onWorkerExit: can't report error status" >&2 && exit $error_code
+			sleep .1s
+		done
+		echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"$ARG_DELIM >&3
+		exec 3>&-;
+#		echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"$ARG_DELIM > $__jobsStatusPipe
+
+		echo "Status reported">>"$workerLog"
 		exit $error_code
 	}
 	trap onWorkerExit EXIT
@@ -199,10 +213,24 @@ jobsStartWorker()
 	while : ; do
 		runningTaskId=$id
 		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
+		echo "Exec: id=$id cmd=$cmd" >> "$workerLog"
        	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
 
 		# Report successful status since exit trap is expected to trig on failure
-		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd"$ARG_DELIM > $__jobsStatusPipe
+		# open pipe first to avoid 'echo: write error: Broken pipe' message
+		local pipe_opened=true
+		while ! exec 3>$__jobsStatusPipe; do
+			if [[ ! -e $__jobsStatusPipe ]]; then
+				echo "onWorkerExit: can't report success status" >&2
+				echo "Can't report status" >> "$workerLog"
+				pipe_opened=false
+			fi
+			sleep .1s
+		done
+		$pipe_opened || break;
+		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd"$ARG_DELIM >&3
+		exec 3>&-;
+#		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd"$ARG_DELIM > $__jobsStatusPipe
 		runningTaskId=
 		runningTaskCmd=
 
@@ -211,17 +239,24 @@ jobsStartWorker()
 			[[ ! -e $__jobsWorkPipe ]] && break
 			sleep .1s
 		done
-		[[ ! -e $__jobsWorkPipe ]] && break
+		if [[ ! -e $__jobsWorkPipe ]]; then
+			echo "workPipe closed" >> "$workerLog"
+			break
+		fi
 
 		# do not break execution on read error
 		if ! readNewTask ':' <&3; then
 			REPLY=
 		fi
 		exec 3>&-;
-		[[ -z "$REPLY" ]] && break
+		if [[ -z "$REPLY" ]]; then
+			echo "no more tasks" >> "$workerLog"
+			break
+		fi
 		id=${REPLY%$ARG_DELIM*}
 		cmd=${REPLY#*$ARG_DELIM}
 	done
+	echo "exit main loop" >> "$workerLog"
 	trap -- EXIT
 }
 
@@ -341,7 +376,7 @@ readNewTask()
 		if [[ -n "$delim" ]]; then
 			id=${REPLY%%$delim*}
 			cmd=${REPLY#"$id$delim"}
-			[[ "$id" == "$REPLY" ]] && echo "error: can't parse task id from '$REPLY'" >&2 && return 1
+			[[ "$id" == "$REPLY" ]] && echo "error: can't parse task id from '$REPLY' with delim '$delim'" >&2 && return 1
 			x=$id;  x=${x%"${x##*[! $'\t']}"}; id=$x
 			x=$cmd; x=${x#"${x%%[! $'\t']*}"}; cmd=$x
 		fi
@@ -359,7 +394,7 @@ jobsRunTasks()
 	local -
 	set -eu
 
-	local taskTxt= delim= tempPath=. logLevel= runMax=1 userText= userFlags=
+	local taskTxt= delim= tempPath=. logLevel= runMax=1 userText= userFlags= logFile=
 	# set all 'kw' args to "-k v" form (accepted input: -kv | -k=v | -k v)
 	while [[ $# != 0 ]]; do
 		local i=$1 v; shift
@@ -396,6 +431,9 @@ jobsRunTasks()
 
 	mkdir -p "$tempPath"
 	tempPath="$(cd "$tempPath" >/dev/null; pwd)"
+	logFile="$tempPath/rpte.log"
+	rm -f "$logFile"
+
 	__jobsRawIdx=0
 	__jobsRunning=0
 	__jobsLogLevel=1
@@ -509,6 +547,7 @@ jobsRunTasks()
 		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 
 		jobsStartWorker "$id" "$cmd" "$userText" "$userFlags" 4<&- &
+		echo "jobsStartWorker $id pid=$!" >> $logFile
 
 		__jobsPid="$__jobsPid $!"
 		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
@@ -518,6 +557,8 @@ jobsRunTasks()
 
 	setWorkerGone() {
 		local pid=$1 x=; shift
+		echo "setWorkerGone pid=$pid" >> $logFile
+
 		{ wait $pid || true; } 2>/dev/null  # may have already gone
 		set -- $__jobsPid; # remove from wait list
 		for x; do shift; if [[ $x != $pid ]]; then set -- "$@" $x; fi; done
@@ -540,6 +581,7 @@ jobsRunTasks()
 
 			# This is a 'ping' - skip it
 			case $REPLY in ping:*) continue; esac
+			echo "statusUpdate: $REPLY " >> $logFile
 
 			# This is a status report - parse it
 			local id status data x
@@ -551,6 +593,8 @@ jobsRunTasks()
 			if [[ -z "$id" ]]; then
 				setWorkerGone $pid; pid= # worker exit due to interrupt
 			else
+				echo "jobsDone $id pid=$pid status=$status" >> $logFile
+
 				__jobsDone=$(( __jobsDone + 1 ))
 				if [[ "$status" != 0 ]]; then
 					setWorkerGone $pid; pid= # worker exit due to task fail
@@ -588,6 +632,7 @@ jobsRunTasks()
 		fi
 		jobsReportProgress
 		echo "$task" 2>/dev/null >$__jobsWorkPipe
+		echo "newTask: $task" >> $logFile
 
 		if [[ -n "$pid" ]]; then
 			setWorkerGone $pid; pid=; # worker exit
