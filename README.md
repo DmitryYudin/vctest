@@ -24,6 +24,7 @@ Screen output example:
 
 ### Prerequisites
 
+- [Msys2](http://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-20200517.tar.xz) (version 20200522 and above has pipe support broken)
 - Run the `download.sh` script to download test vectors and codecs.
 - The `7z` executable is already reside in the `bin` directory.
 
