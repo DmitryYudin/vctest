@@ -28,7 +28,7 @@ usage()
 	    -c|--codec    Reference codecId (default: first found)
 
 	Example:
-	    $(basename $0) -c x265 -i report_k2.log
+	    $(basename $0) -c x265 -i report_k2.kw
 	EOF
 }
 
@@ -80,8 +80,8 @@ entrypoint()
 	echo "codecs: $codecs" > /dev/tty
 	echo "vectors: $vectors" > /dev/tty
 
-	for src in $vectors; do
 	for codec in $codecs; do
+	for src in $vectors; do
 		local report=
 		for key in $KEYS; do
 			local refData= tstData=
@@ -116,8 +116,10 @@ entrypoint()
 			printf -v report "%s BD-rate($key):%-6.2f BD-PSNR($key):%-6.2f" "$report" "$bdRate" "$bdPSNR"
 		done
 		report=${report# }
+        local res=
+        detect_resolution_string "$src"; res=$REPLY
 		if [[ -n "$report" ]]; then
-			printf "ref:%-10s tst:%-10s $report SRC:%s\n" "$REF_CODEC" "$codec" "$src"
+			printf "ref:%-13s tst:%-13s %-9s $report SRC:%s\n" "$REF_CODEC" "$codec" "$res" "$src"
 		fi
 	done
 	done

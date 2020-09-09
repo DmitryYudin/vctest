@@ -35,8 +35,8 @@ usage()
 	Options:
 	    -h|--help        Print help.
 	    -i|--input   <x> Input YUV files. Multiple '-i vec' allowed.
-	    -d|--dir     <x> Output directory. Default: "$DIR_OUT"
-	    -o|--output  <x> Report path.
+	    -d|--dir     <x> Output directory. Default: "$DIR_OUT".
+	    -o|--output  <x> Report path. Default: "$REPORT".
 	    -c|--codec   <x> Codecs list. Default: "$CODECS".
 	    -t|--threads <x> Number of threads to use
 	    -p|--prms    <x> Bitrate (kbps) or QP list. Default: "$PRMS".
@@ -241,19 +241,16 @@ entrypoint()
 vectors_verify()
 {
 	local remote=$1; shift
-	local VECTORS="$*" vec= removeList=
+	local VECTORS="$*" vec= vecList=
 
 	for vec in $VECTORS; do
-		if ! [[ -f "$vec" ]]; then
+		if [[ -f "$vec" ]]; then
+			vecList="$vecList $vec"
+		else
 			echo "warning: can't find vector. Remove '$vec' from a list."
-			removeList="$removeList $vec"
-			continue
 		fi
 	done
-
-	for vec in $removeList; do
-		VECTORS=$(echo "$VECTORS" | sed "s/$vec//")
-	done
+	VECTORS=${vecList# }
 
 	local VECTORS_ABS=
 	for vec in $VECTORS; do
@@ -516,7 +513,7 @@ output_report()
 	dict_getValue "$dict" encExeHash; ENC=$REPLY ; ENC=${ENC##*_}
 
 	local str=
-	printf 	-v str    "%6s %8.2f %5s %5.0f"            "$extFPS" "$intFPS" "$cpu" "$kbps"
+	printf 	-v str    "%6s %8.3f %5s %5.0f"            "$extFPS" "$intFPS" "$cpu" "$kbps"
 	printf 	-v str "%s %3d %7.0f %6.0f %4.1f"   "$str" "$numI" "$avgI" "$avgP" "$peak"
 	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f" "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
 	printf 	-v str "%s %-8s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"

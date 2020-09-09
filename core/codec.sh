@@ -114,20 +114,24 @@ codec_verify()
 {
 	local remote=$1; shift
 	local target=$1; shift
-	local CODECS="$*" codecId= cmd= removeList=
+	local CODECS="$*" codecId= cmd= codecList=
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
 
 	for codecId in $CODECS; do
 		exe_${codecId} $target; encoderExe=$REPLY
-
-		if ! [[ -f "$encoderExe" ]]; then
-			echo "warning: can't find executable. Remove '$codecId' from a list."
-			removeList="$removeList $codecId"
+		if [[ -z "$encoderExe" ]]; then
+			echo "warning: no executable associated with '$codecId' codecId. Remove '$codecId' from a list." >&2
+			continue
+        fi
+		if [[ ! -f "$encoderExe" ]]; then
+			echo "warning: can't find '$encoderExe' executable. Remove '$codecId' from a list." >&2
 			continue
 		fi
-		if ! $remote; then
+		if $remote; then
+			codecList="$codecList $codecId"
+        else
 			local cmd=$encoderExe
 			# temporary hack, for backward compatibility (remove later)
 			if [[ $codecId == h265demo ]]; then
@@ -140,18 +144,16 @@ codec_verify()
 
 			if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
 				echo "warning: encoding error. Remove '$codecId' from a list." >&2;
-				removeList="$removeList $codecId"
+            else
+    			codecList="$codecList $codecId"
 			fi
 			rm -f "$dirOut/out.tmp"
 		fi
 	done
+	CODECS=${codecList# }
 
 	rm -rf -- "$dirOut"
 	trap -- EXIT
-
-	for codecId in $removeList; do
-		CODECS=$(echo "$CODECS" | sed "s/$codecId//")
-	done
 
 	if $remote; then
 		# Push executable (folder content) on a target device
@@ -434,7 +436,9 @@ cmd_h264demo()
 			   --res) 		args="$args Resolution = $2"
 							args="$args StrideWH = $2";;
 			   --fps) 		args="$args iInputFps = $2"
-							args="$args fFrameRate = $2";;
+							args="$args fFrameRate = $2"
+			        	    args="$args iMinQP = 1"
+							args="$args iMaxQP = 51";;
 			   --qp)     	args="$args iMinQP = $2"
 							args="$args iMaxQP = $2";;
 			   --bitrate)   bitrateKbps=$2;;
@@ -469,6 +473,6 @@ cmd_h264demo()
 	args="$args bReconstuctFrame = 0"
 	args="$args Framecount = 999999"
 
-#	REPLY="--test $args"
-	REPLY=$args
+	REPLY="--test $args"   # produce output, but have slow speed
+#	REPLY="--speed $args"  # no output, but demonstrate high speed
 }
