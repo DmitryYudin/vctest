@@ -9,7 +9,8 @@ case 1 in
 	0)	PRMS=" 60    80  120   150"
 		VECTORS="akiyo_qcif.yuv foreman_qcif.yuv" # fast check
 	;;
-	1)	PRMS="500  1000 1500  2000"
+	1)	PRMS="500  1000 1500  2000"  # BR
+		#PRMS="28 34 39 44"          # QP
 		VECTORS="\
 			tears_of_steel_1280x720_24.webm.yuv\
 			FourPeople_1280x720_30.y4m.yuv\
@@ -27,5 +28,5 @@ VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
 ./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "$PRMS" -o "$report" "$@"
 
 # Calcultate BD-rate
-echo "$timestamp" >> bdrate.log
+echo "$timestamp PRMS=[$PRMS] $*" >> bdrate.log
 ./core/bdrate.sh -c ${CODECS%% *} -i ${report%.*}.kw | tee -a bdrate.log

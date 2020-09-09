@@ -134,31 +134,33 @@ detect_resolution_string()
 		local IFS=$delim
 		for i in $name; do
 			case $i in # https://en.wikipedia.org/wiki/Common_Intermediate_Format
-				 NTSC|ntsc) res=352x240;;   # 30 fps (11:9)  <=> SIF
-				SQSIF|sqsif) res=128x96;;
-				 QSIF|qsif)  res=176x120;;
-			  	  SIF|sif)   res=352x240;;
-				 2SIF|2sif)  res=704x240;;
-				 4SIF|4sif)  res=704x480;;
-				16SIF|16sif) res=1408x960;;
+				 NTSC|ntsc)   res=352x240;;   # 30 fps (11:9)  <=> SIF
+				SQSIF|sqsif)  res=128x96;;
+				 QSIF|qsif)   res=176x120;;
+			  	  SIF|sif)    res=352x240;;
+				 2SIF|2sif)   res=704x240;;
+				 4SIF|4sif)   res=704x480;;
+				16SIF|16sif)  res=1408x960;;
 
-				  PAL|pal)   res=352x288;;   # 25 fps         <=> CIF
-				SQCIF|sqcif) res=128x96;;
-				 QCIF|qcif)  res=176x144;;
-			 	  CIF|cif)   res=352x288;;
-				 2CIF|2cif)  res=704x288;;   # Half D1
-				 4CIF|4cif)  res=704x576;;   # D1
-				16CIF|16cif) res=1408x1152;;
+				  PAL|pal)    res=352x288;;   # 25 fps         <=> CIF
+				SQCIF|sqcif)  res=128x96;;
+				 QCIF|qcif)   res=176x144;;
+			 	  CIF|cif)    res=352x288;;
+				 2CIF|2cif)   res=704x288;;   # Half D1
+				 4CIF|4cif)   res=704x576;;   # D1
+				16CIF|16cif)  res=1408x1152;;
 
-				720P|720p)   res=1280x720;;
-			   1080P|1080p)  res=1920x1080;;
-			   1440P|1440p)  res=2560x1440;;
-			   2160P|2160p)  res=3840x2160;;
-			   4320P|4320p)  res=7680x4320;;
+				360P*|360p*)  res=480x360;;
+				480P*|480p*)  res=704x480;;
+				720P*|720p*)  res=1280x720;;
+			   1080P*|1080p*) res=1920x1080;;
+			   1440P*|1440p*) res=2560x1440;;
+			   2160P*|2160p*) res=3840x2160;;
+			   4320P*|4320p*) res=7680x4320;;
 
-			      2K|2k)     res=1920x1080;; # or 2560x1440
-			      4K|4k)     res=3840x2160;;
-			      8K|8k)     res=7680x4320;;
+			       2K|2k)     res=1920x1080;; # or 2560x1440
+			       4K|4k)     res=3840x2160;;
+			       8K|8k)     res=7680x4320;;
 			esac
 			[[ -n "$res" ]] && break
 		done
