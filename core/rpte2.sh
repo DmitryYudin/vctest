@@ -104,6 +104,28 @@ jobsStartPing()
 	} </dev/null 1>/dev/null 2>/dev/null &
 }
 
+pipeOpen()
+{
+    local mode=$1; shift
+    local pipeName=$1; shift
+    if [[ $mode == w ]]; then
+        # Normally we need not open pipe manually when writing since bash should block write access till pipe is available.
+        # It looks like named pipes are not workable for WSL, WSL2 and broken for MSYS2 starting from rel 20200522,
+        # so we try to overcome this issue with more careful approach.
+        # Unfortunately, this does not help: We still observe lost and broken messages.
+    	while ! exec 3>$pipeName; do
+	    	[[ ! -e $pipeName ]] && return 1
+		    sleep .1s
+    	done
+    else
+    	while ! exec 3<$pipeName; do
+		    [[ ! -e $pipeName ]] && return 1
+	    	sleep .1s
+    	done
+    fi
+    return 0
+}
+
 #
 # Execute single task with output streams redirected to $tempPath/$id.stream.log
 # Set exist status to task execution status.
@@ -173,12 +195,36 @@ executeSingleTask()
 # on normal process exit. We still may catch a race condition if interrupt
 # appears in between writing to the statusPIPE and clearing the 'runningTaskId'
 # variable.
+debug_log_init()
+{
+    local type=$1; shift
+    local logfile=
+    if [[ $type == worker ]]; then
+    	logfile=$tempPath/$BASHPID.worker.log
+    else
+    	logfile=$tempPath/master.log
+    fi
+	rm -f "$logfile"
+}
+debug_log()
+{
+    local type=$1; shift
+    local logfile=
+    if [[ $type == worker ]]; then
+    	logfile=$tempPath/$BASHPID.worker.log
+    else
+    	logfile=$tempPath/master.log
+    fi
+    echo "$@" >> $logfile
+}
 jobsStartWorker()
 {
 	[[ $ENABLE_NAMED_PIPE != 1 ]] && return 1
 
 	local -
 	set -eu
+
+    debug_log_init worker
 
 	local id=$1; shift
 	local cmd=$1; shift
@@ -190,7 +236,18 @@ jobsStartWorker()
 	onWorkerExit() {
 		local error_code=0
 		[[ -n "$runningTaskId" ]] && error_code=1
-		echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"$ARG_DELIM > $__jobsStatusPipe
+
+        debug_log worker "Try exit with error_code=$error_code"
+
+		# open pipe first to avoid 'echo: write error: Broken pipe' message
+        if ! pipeOpen "w" "$__jobsStatusPipe"; then
+            echo "on_exit: can't report error status, pipe closed" >&2
+            debug_log worker "Status NOT reported"
+        else
+	    	echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"$ARG_DELIM >&3
+    		exec 3>&-;
+            debug_log worker "Status reported"
+        fi
 		exit $error_code
 	}
 	trap onWorkerExit EXIT
@@ -199,29 +256,43 @@ jobsStartWorker()
 	while : ; do
 		runningTaskId=$id
 		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
+
+        debug_log worker "Exec: id=$id cmd=[$cmd]"
        	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
 
 		# Report successful status since exit trap is expected to trig on failure
-		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd"$ARG_DELIM > $__jobsStatusPipe
+		# open pipe first to avoid 'echo: write error: Broken pipe' message
+        if ! pipeOpen "w" "$__jobsStatusPipe"; then
+			echo "main_loop: can't report success status, pipe closed" >&2
+            debug_log worker "Status NOT reported"
+            break
+        else
+    		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd"$ARG_DELIM >&3
+	    	exec 3>&-;
+        fi
 		runningTaskId=
 		runningTaskCmd=
 
 		# Open for reading (prevent 'Device or resource busy' error)
-		while ! exec 3<$__jobsWorkPipe; do
-			[[ ! -e $__jobsWorkPipe ]] && break
-			sleep .1s
-		done
-		[[ ! -e $__jobsWorkPipe ]] && break
+        if ! pipeOpen "r" "$__jobsWorkPipe"; then
+            debug_log worker "workPipe closed"
+            break
+        else
+	    	# do not break execution on read error
+    		if ! readNewTask ':' <&3; then
+		    	REPLY=
+	    	fi
+    		exec 3>&-;
+        fi
 
-		# do not break execution on read error
-		if ! readNewTask ':' <&3; then
-			REPLY=
+		if [[ -z "$REPLY" ]]; then
+            debug_log worker "no more tasks"
+			break
 		fi
-		exec 3>&-;
-		[[ -z "$REPLY" ]] && break
 		id=${REPLY%$ARG_DELIM*}
 		cmd=${REPLY#*$ARG_DELIM}
 	done
+    debug_log worker "exit main loop"
 	trap -- EXIT
 }
 
@@ -341,7 +412,7 @@ readNewTask()
 		if [[ -n "$delim" ]]; then
 			id=${REPLY%%$delim*}
 			cmd=${REPLY#"$id$delim"}
-			[[ "$id" == "$REPLY" ]] && echo "error: can't parse task id from '$REPLY'" >&2 && return 1
+			[[ "$id" == "$REPLY" ]] && echo "error: can't parse task id from '$REPLY' with delim '$delim'" >&2 && return 1
 			x=$id;  x=${x%"${x##*[! $'\t']}"}; id=$x
 			x=$cmd; x=${x#"${x%%[! $'\t']*}"}; cmd=$x
 		fi
@@ -396,6 +467,9 @@ jobsRunTasks()
 
 	mkdir -p "$tempPath"
 	tempPath="$(cd "$tempPath" >/dev/null; pwd)"
+
+    debug_log_init master
+
 	__jobsRawIdx=0
 	__jobsRunning=0
 	__jobsLogLevel=1
@@ -509,6 +583,7 @@ jobsRunTasks()
 		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 
 		jobsStartWorker "$id" "$cmd" "$userText" "$userFlags" 4<&- &
+		debug_log master "jobsStartWorker $id pid=$!"
 
 		__jobsPid="$__jobsPid $!"
 		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
@@ -518,6 +593,8 @@ jobsRunTasks()
 
 	setWorkerGone() {
 		local pid=$1 x=; shift
+		debug_log master "setWorkerGone pid=$pid"
+
 		{ wait $pid || true; } 2>/dev/null  # may have already gone
 		set -- $__jobsPid; # remove from wait list
 		for x; do shift; if [[ $x != $pid ]]; then set -- "$@" $x; fi; done
@@ -540,6 +617,7 @@ jobsRunTasks()
 
 			# This is a 'ping' - skip it
 			case $REPLY in ping:*) continue; esac
+			debug_log master "statusUpdate: $REPLY"
 
 			# This is a status report - parse it
 			local id status data x
@@ -551,6 +629,8 @@ jobsRunTasks()
 			if [[ -z "$id" ]]; then
 				setWorkerGone $pid; pid= # worker exit due to interrupt
 			else
+				debug_log master "jobsDone $id pid=$pid status=$status"
+
 				__jobsDone=$(( __jobsDone + 1 ))
 				if [[ "$status" != 0 ]]; then
 					setWorkerGone $pid; pid= # worker exit due to task fail
@@ -588,6 +668,7 @@ jobsRunTasks()
 		fi
 		jobsReportProgress
 		echo "$task" 2>/dev/null >$__jobsWorkPipe
+		debug_log master "newTask: $task"
 
 		if [[ -n "$pid" ]]; then
 			setWorkerGone $pid; pid=; # worker exit
