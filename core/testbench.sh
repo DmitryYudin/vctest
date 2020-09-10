@@ -774,80 +774,66 @@ parse_framestat()
 	local kbpsLog=$1; shift
 	local summaryLog=$1; shift
 
-	countTotal() { 
-		awk '{ cnt +=  1 } END { print cnt }'
-	}
-	countSum() { 
-		awk '{ sum += $1 } END { print sum }'
-	}
-	countAverage() { 
-		awk '{ sum += $1; cnt++ } END { print cnt !=0 ? sum / cnt : 0 }'
-	}
-	countMSE() { # mse_y mse_u mse_v -> mse
-		awk '{ print ( $1 + $2/4 + $3/4 ) / 1.5 }'
-	}
-	countGlobalPSNR() { # psnr_y psnr_y psnr_v -> globalPSNR
-		awk '{ print ( 6*$1 + $2 + $3 ) / 8 }'
-	}
-
-	local kbps=
+	local kbps= summary=
 	kbps=$(cat "$kbpsLog")
 
-	local psnrI= psnrP= gPSNR=
-	if [[ 0 == 1 ]]; then # Avg(FramePSNR)
-		psnrI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_avg:\([^ ]*\).*/\1/' | countAverage )
-		psnrP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_avg:\([^ ]*\).*/\1/' | countAverage )
-	else                # GlobalPSNR( Avg(Y), Avg(U), Avg(V) ) <= x265
-		local psnr_y=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_u=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_v=$( grep -i 'type:I' "$summaryLog" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
-		psnrI=$(echo "$psnr_y" "$psnr_u" "$psnr_v" | countGlobalPSNR)
+    local script='
+        function get_value(name,           a, b) {
+            split ($0, a, name);
+            split (a[2], b);
+            return b[1];
+        }
+    	function countGlobalPSNR(psnr_y, psnr_u, psnr_v) {
+            return ( 6*psnr_y + psnr_u + psnr_v ) / 8;
+	    }
+	    function x265_ssim2dB(ssim) {
+			return (1 - ssim) <= 0.0000000001 ? 100 : -10*log(1 - ssim)/log(10)
+	    }
 
-		local psnr_y=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_u=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_v=$( grep -i 'type:P' "$summaryLog" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
-		psnrP=$(echo "$psnr_y" "$psnr_u" "$psnr_v" | countGlobalPSNR)
-	fi
-	{
-		local psnr_y=$( cat "$summaryLog" | sed 's/.* psnr_y:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_u=$( cat "$summaryLog" | sed 's/.* psnr_u:\([^ ]*\).*/\1/' | countAverage )
-		local psnr_v=$( cat "$summaryLog" | sed 's/.* psnr_v:\([^ ]*\).*/\1/' | countAverage )
-		gPSNR=$(echo "$psnr_y" "$psnr_u" "$psnr_v" | countGlobalPSNR)
-	}
+        BEGIN {
+        } 
+           
+        {
+            psnr_y = get_value("psnr_y:");
+            psnr_u = get_value("psnr_u:");
+            psnr_v = get_value("psnr_v:");
+            ssim = get_value("Y:");
+            size = get_value("size:");
+        }
+        {
+                   num++;  psnr_y_avg  += psnr_y; psnr_u_avg  += psnr_u; psnr_v_avg  += psnr_v; ssim_avg  += ssim;
+        }
 
-	local ssimI= ssimP= gSSIM=
-	if [[ 0 == 1 ]]; then # Full
-		ssimI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
-		ssimP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
-		gSSIM=$(              cat "$summaryLog" | sed 's/.* All:\([^ ]*\).*/\1/' | countAverage )
-	else                # Luma <= x265 reports only Y-SSIM
-		ssimI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
-		ssimP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
-		gSSIM=$(              cat "$summaryLog" | sed 's/.* Y:\([^ ]*\).*/\1/' | countAverage )
-	fi
+        /type:I/ { numI++; psnr_y_avgI += psnr_y; psnr_u_avgI += psnr_u; psnr_v_avgI += psnr_v; ssim_avgI += ssim; sizeI += size; }
+        /type:P/ { numP++; psnr_y_avgP += psnr_y; psnr_u_avgP += psnr_u; psnr_v_avgP += psnr_v; ssim_avgP += ssim; sizeP += size; }
+        END {
+            if( num > 0 ) {
+                psnr_y_avg  /= num;  psnr_u_avg  /= num;  psnr_v_avg  /= num;  ssim_avg  /= num;
+            }
 
-	local numI=$(  grep -i 'type:I' "$summaryLog" | countTotal )
-	local sizeI=$( grep -i 'type:I' "$summaryLog" | sed 's/.* size:\([^ ]*\).*/\1/' | countSum )
-	local avgI=$(  grep -i 'type:I' "$summaryLog" | sed 's/.* size:\([^ ]*\).*/\1/' | countAverage )
-	local numP=$(  grep -i 'type:P' "$summaryLog" | countTotal )
-	local sizeP=$( grep -i 'type:P' "$summaryLog" | sed 's/.* size:\([^ ]*\).*/\1/' | countSum)
-	local avgP=$(  grep -i 'type:P' "$summaryLog" | sed 's/.* size:\([^ ]*\).*/\1/' | countAverage )
-	local peakFac=$(echo "$avgI $avgP" | awk '{ fac = $2 != 0 ? $1 / $2 : 0; print fac; }' )
+            if( numI > 0 ) {
+                psnr_y_avgI /= numI; psnr_u_avgI /= numI; psnr_v_avgI /= numI; ssim_avgI /= numI; avgI = sizeI/numI;
+            }
+            if( numP > 0 ) {
+                psnr_y_avgP /= numP; psnr_u_avgP /= numP; psnr_v_avgP /= numP; ssim_avgP /= numP; avgP = sizeP/numP;
+            }
 
-	x265_ssim2dB() {
-		awk -v ssim=$1 'BEGIN { 
-			print (1 - ssim) <= 0.0000000001 ? 100 : -10*log(1 - ssim)/log(10)
-		}'
-	}
-	local gSSIM_db=$(x265_ssim2dB "$gSSIM")
-	local gSSIM_en=$gSSIM
-	gSSIM=$gSSIM_db # report in dB, write to kw-report in linear and dB scale
- 
-	echo 	"kbps:$kbps "\
-			"numI:$numI numP:$numP sizeI:$sizeI sizeP:$sizeP "\
-			"avgI:$avgI avgP:$avgP peak:$peakFac "\
-			"psnrI:$psnrI psnrP:$psnrP gPSNR:$gPSNR ssimI:$ssimI ssimP:$ssimP gSSIM:$gSSIM "\
-			"gSSIM_db:$gSSIM_db gSSIM_en:$gSSIM_en"
+            gPSNR = countGlobalPSNR(psnr_y_avg,  psnr_u_avg,  psnr_v_avg );  gSSIM = ssim_avg
+            psnrI = countGlobalPSNR(psnr_y_avgI, psnr_u_avgI, psnr_v_avgI);  ssimI = ssim_avgI
+            psnrP = countGlobalPSNR(psnr_y_avgP, psnr_u_avgP, psnr_v_avgP);  ssimP = ssim_avgP
+            peak = avgP > 0 ? avgI/avgP : 0;
+
+            gSSIM_db=x265_ssim2dB(gSSIM)
+            print "numI:"numI" numP:"numP" sizeI:"sizeI" sizeP:"sizeP\
+                 " avgI:"avgI" avgP:"avgP" peak:"peak\
+                 " psnrI:"psnrI" psnrP:"psnrP" gPSNR:"gPSNR\
+                 " ssimI:"ssimI" ssimP:"ssimP" gSSIM:"gSSIM_db\
+                 " gSSIM_db:"gSSIM_db" gSSIM_en:"gSSIM
+        }
+    '
+    summary=$(awk "$script" "$summaryLog")
+
+    echo "kbps:$kbps $summary"
 }
 
 parse_cpuLog()
@@ -878,34 +864,34 @@ parse_stdoutLog()
 	local fps= snr=
 	case $codecId in
 		ashevc)
-			fps=$(cat "$log" | grep ' fps)' | tr -s ' ' | cut -d' ' -f 6); fps=${fps#(}
+			fps=$(grep -i ' fps)'           "$log" | tr -s ' ' | cut -d' ' -f 6); fps=${fps#(}
 		;;
 		x265)
-			fps=$(cat "$log" | grep ' fps)' | tr -s ' ' | cut -d' ' -f 6); fps=${fps#(}
+			fps=$(grep -i ' fps)'           "$log" | tr -s ' ' | cut -d' ' -f 6); fps=${fps#(}
 		;;
 		kvazaar)
-			fps=$(cat "$log" | grep ' FPS:' | tr -s ' ' | cut -d' ' -f 3)
+			fps=$(grep -i ' FPS:'           "$log" | tr -s ' ' | cut -d' ' -f 3)
 		;;
 		kingsoft)
-			fps=$(cat "$log" | grep 'test time: ' | tr -s ' ' | cut -d' ' -f 8)
-			#fps=$(cat "$log" | grep 'pure encoding time:' | head -n 1 | tr -s ' ' | cut -d' ' -f 8)
+			fps=$(grep -i 'test time: '     "$log" | tr -s ' ' | cut -d' ' -f 8)
+			#fps=$(grep -i 'pure encoding time:' "$log" | head -n 1 | tr -s ' ' | cut -d' ' -f 8)
 		;;
 		ks)
-			fps=$(cat "$log" | grep 'FPS: ' | tr -s ' ' | cut -d' ' -f 2)
+			fps=$(grep -i 'FPS: '           "$log" | tr -s ' ' | cut -d' ' -f 2)
 		;;
 		intel_*)
-			fps=$(cat "$log" | grep 'Encoding fps:' | tr -s ' ' | cut -d' ' -f 3)
+			fps=$(grep -i 'Encoding fps:'   "$log" | tr -s ' ' | cut -d' ' -f 3)
 		;;
 		h265demo)
-			fps=$(cat "$log" | grep 'TotalFps:' | tr -s ' ' | cut -d' ' -f 5)
+			fps=$(grep -i 'TotalFps:'       "$log" | tr -s ' ' | cut -d' ' -f 5)
 		;;
 		h265demo_v2)
-			fps=$(cat "$log" | grep 'Encode speed:' | tr -s ' ' | cut -d' ' -f 9)
+			fps=$(grep -i 'Encode speed:'   "$log" | tr -s ' ' | cut -d' ' -f 9)
 			fps=${fps%%fps}
 		;;
 		h264demo)
-			fps=$(cat "$log" | grep 'Tests completed' | tr -s ' ' | cut -d' ' -f 1)
-			snr=$(cat "$log" | grep 'Tests completed' | tr -s ' ' | cut -d' ' -f 5)
+			fps=$(grep -i 'Tests completed' "$log" | tr -s ' ' | cut -d' ' -f 1)
+			snr=$(grep -i 'Tests completed' "$log" | tr -s ' ' | cut -d' ' -f 5)
 		;;
 		*) error_exit "unknown encoder: $codecId";;
 	esac
