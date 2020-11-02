@@ -401,7 +401,7 @@ progress_next()
 	local outputDirRel=$1; shift
 	local outputDir="$DIR_OUT/$outputDirRel" info=
 
-	info=$(cat $outputDir/info.kw)
+    { read -r info; } < "$outputDir/info.kw"
 
 	if [[ -n "$PROGRESS_HDR" ]]; then
 		print_console "$PROGRESS_HDR\n"
@@ -531,8 +531,8 @@ report_single_file()
 	local outputDir="$DIR_OUT/$outputDirRel"
 
 	local info= report=
-	info=$(cat "$outputDir/info.kw")
-	report=$(cat "$outputDir/report.kw")		
+    { read -r info; } < "$outputDir/info.kw"
+    { read -r report; } < "$outputDir/report.kw"
 
 	output_report "$info $report"
 }
@@ -545,7 +545,8 @@ encode_single_file()
 	pushd "$outputDir"
 
 	local info= encCmdArgs= codecId= src= dst= encCmdSrc= encCmdDst= srcNumFr=
-	info=$(cat info.kw)
+    { read -r info; } < "info.kw"
+
 	dict_getValueEOL "$info" encCmdArgs; encCmdArgs=$REPLY
 	dict_getValue "$info" codecId; codecId=$REPLY
 	dict_getValue "$info" encExe; encExe=$REPLY
@@ -671,7 +672,8 @@ decode_single_file()
 	pushd "$outputDir"
 
 	local info= src= dst=
-	info=$(cat info.kw)
+    { read -r info; } < "info.kw"
+
 	dict_getValue "$info" src; src=$(ospath "$REPLY")
 	dict_getValue "$info" dst; dst=$REPLY
 
@@ -741,7 +743,8 @@ parse_single_file()
 	pushd "$outputDir"
 
 	local info= codecId=
-	info=$(cat info.kw)
+    { read -r info; } < "info.kw"
+
 	dict_getValue "$info" codecId; codecId=$REPLY
 
 	local stdoutLog=stdout.log
@@ -756,7 +759,7 @@ parse_single_file()
 		printf -v cpuAvg "%.0f" "$cpuAvg"
 	fi
 	if [[ -f "$fpsLog" ]]; then # may not exist
-		extFPS=$(cat "$fpsLog")
+        { read -r extFPS; } < "$fpsLog"
 	fi
 	intFPS=$(parse_stdoutLog "$codecId" "$stdoutLog")
 	framestat=$(parse_framestat "$kbpsLog" "$summaryLog")
@@ -775,7 +778,7 @@ parse_framestat()
 	local summaryLog=$1; shift
 
 	local kbps= summary=
-	kbps=$(cat "$kbpsLog")
+    { read -r kbps; } < "$kbpsLog"
 
     local script='
         function get_value(name,           a, b) {
