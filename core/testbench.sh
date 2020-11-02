@@ -190,7 +190,7 @@ entrypoint()
 	#
 	# Decoding
 	#
-	NCPU=-1 # use (all+1) cores for decoding
+	NCPU=-2 # use (all+1) cores for decoding
 	progress_begin "[3/5] Decoding..." "$decodeList"
 	if [[ -n "$decodeList" ]]; then
 		for outputDirRel in $decodeList; do
@@ -203,7 +203,7 @@ entrypoint()
 	#
 	# Parsing
 	#
-	NCPU=-16 # use (all + 16) cores
+	NCPU=-3 # use (all + 2) cores
 	progress_begin "[4/5] Parsing..." "$parseList"
 	if [[ -n "$parseList" ]]; then
 		for outputDirRel in $parseList; do
@@ -265,6 +265,7 @@ vectors_verify()
 		echo "Push vectors to remote machine $remoteDirVec ..."
 		TARGET_exec "mkdir -p $remoteDirVec"
 		for vec in $VECTORS_ABS; do
+            print_console "$vec\r"
 			TARGET_pushFileOnce "$(ospath $vec)" $remoteDirVec/${vec##*/}
 		done
 	fi
