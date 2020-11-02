@@ -35,8 +35,9 @@ usage()
 	       --test    Run test
 	    -p <path>    Temporary path for stdout/stderr logs
 	    -j <n>       Maximum number of tasks running in parallel (default: 1)
-	                    = 0 - all CPUs
-	                    < 0 - all CPUs + |n|
+	                    =  0 - all CPUs
+	                    = -1 - all CPUs - 1    (i.e. reserve one core)
+	                    <  0 - all CPUs + |n|
 	    -d <char>    Task id delimiter: ':', ' ', ... . If not set, the Id is
 	                 generated automatically in the execution order (default: auto)
 	    -t <text>    Text message to append to stdout log for every executed task
@@ -454,13 +455,20 @@ jobsRunTasks()
 	[[ -z "$taskTxt" ]] && { echo "error: not task file" >&2 && return 1; }
 	[[ ! -f "$taskTxt" ]] && { echo "error: task file $taskTxt does not exist" >&2 && return 1; }
 
+    # set term width
+	if [[ -z "${COLUMNS:-}" ]]; then
+		case ${OS:-} in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2) && export COLUMNS; esac
+	fi
+
 	# Get last cpu index. We are going to use NCPU-1 cores to run
 	if [[ "$runMax" -le 0 ]]; then
 		x="$(grep 'processor' /proc/cpuinfo)"; x="${x##* }"; # last cpu index
-		if [[ "$runMax" == 0 ]]; then
+		if [[ "$runMax" == 0 ]]; then     # all CPUs
 			runMax=$(( x + 1 ))
-		else
-			[[ "$x" == 0 ]] && runMax=1 || runMax=$((x + 1 - runMax))
+		elif [[ "$runMax" == -1 ]]; then  # all CPUs - 1
+			runMax=$x
+		else                              # all CPUs + |n| - 1
+			[[ "$x" == 0 ]] && runMax=1 || runMax=$((x + 1 - runMax - 1))
 		fi
 	fi
 	[[ "$runMax" -le 0 ]] && { echo "error: can't detect CPU number" >&2 && return 1; }
