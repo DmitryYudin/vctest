@@ -27,7 +27,9 @@ readonly ffmpegExe=$dirBin/ffmpeg
 
 readonly URLS=$(cat <<'EOT'
 	# ffmpeg
-	https://ffmpeg.zeranoe.com/builds/win64/static/ffmpeg-20200525-6268034-win64-static.zip
+	# https://www.reddit.com/r/ffmpeg/comments/ikht2k/ffmpegzeranoecom_will_close_on_sep_18_2020/
+	# https://ffmpeg.zeranoe.com/builds/win64/static/ffmpeg-20200525-6268034-win64-static.zip
+	https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z
 
 	# Encoders
 	https://software.intel.com/sites/default/files/managed/61/d0/MediaSamples_MSDK_2017_8.0.24.271.msi
@@ -35,7 +37,8 @@ readonly URLS=$(cat <<'EOT'
 	https://github.com/ksvc/ks265codec/raw/master/android_arm64/appencoder
 	https://github.com/ultravideo/kvazaar/releases/download/v1.3.0/Win64-Release.zip
 	# https://builds.x265.eu/x265-64bit-8bit-latest.exe
-	http://msystem.waw.pl/x265/x265-3.4+1-7b12030-stable_vs2019-AVX2.7z
+	#http://msystem.waw.pl/x265/x265-3.4+1-7b12030-stable_vs2019-AVX2.7z
+	http://msystem.waw.pl/x265/x265-3.4+12-g9103-stable_vs2019-AVX2.7z
 
 	# ARC
 	https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/ASHEVCEnc.dll
