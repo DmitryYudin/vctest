@@ -224,9 +224,38 @@ menu_group_maxfreq()
 	done
 	eval "gr_cpus=\$GR${REPLY}_cpus"
 	eval "gr_fmax=\$GR${REPLY}_fmax"
+	eval "gr_flst=\$GR${REPLY}_flst"
+
+    get_list_size() {
+        local list=$1 i= cnt=0; shift
+        for i in $list; do cnt=$(( cnt + 1 )); done
+        REPLY=$cnt
+    }
+    get_list_item_by_index() {
+        local list=$1 idx=$2; i= cnt=0; shift 2
+        for i in $list; do
+            [[ $cnt == $idx ]] && break
+            cnt=$(( cnt + 1 ))
+        done
+        REPLY=$i
+    }
+    local fr= i=0
+    for fr in $gr_flst; do printf "%2d: %7s\n" $i $fr; i=$((i+1)); done
+    local numFreq=
+    get_list_size "$gr_flst"; numFreq=$REPLY
+	echo "Enter frequency index [0-$((numFreq - 1))] or press 'c' to cancel:"
+	while read -s; do
+		[[ $REPLY == c ]] && return
+		case $REPLY in [0-9]*) [[ 0 -le $REPLY && $REPLY -lt $numFreq ]] && break; esac
+	done
+    get_list_item_by_index "$gr_flst" $REPLY
+    local freq=$REPLY
+
+    local cpu=
 	for cpu in $gr_cpus; do
 		set_cpu_governor $cpu userspace || return 0
-		set_cpu_freq     $cpu $gr_fmax || return 0
+#		set_cpu_freq     $cpu $gr_fmax || return 0
+		set_cpu_freq     $cpu $freq || return 0
 	done
 	echo Success
 
@@ -338,18 +367,22 @@ groups_update()
 	build_cpu_list 1; cpu_online="$REPLY"
 
 	for cpu in $cpu_online; do
-		local fmin= fmax= govr=
+		local fmin= fmax= govr= flst=
 		fmin=$(cat /sys/devices/system/cpu/cpu$cpu/cpufreq/cpuinfo_min_freq)
 		fmax=$(cat /sys/devices/system/cpu/cpu$cpu/cpufreq/cpuinfo_max_freq)
+        flst=$(cat /sys/devices/system/cpu/cpu$cpu/cpufreq/stats/time_in_state | sort -n -u | cut -s -d' ' -f1 | tr $'\n' ' ')
+        flst=${flst%% }
 		govr=$(cat /sys/devices/system/cpu/cpu$cpu/cpufreq/scaling_governor 2>/dev/null) || govr=N/A
 		local CPU${cpu}_fmin=$fmin
 		local CPU${cpu}_fmax=$fmax
-		local CPU${cpu}_govr=$govr
+		local CPU${cpu}_flst="$flst"
+		local CPU${cpu}_govr="$govr"
 	done
 	local gr_cpus= gr_fmin= gr_fmax= gr_govr= idx=0
 	for cpu in $cpu_online; do
 		eval "fmin=\$CPU${cpu}_fmin"
 		eval "fmax=\$CPU${cpu}_fmax"
+		eval "flst=\$CPU${cpu}_flst"
 		eval "govr=\$CPU${cpu}_govr"
 		if [[ ${gr_fmin}-${gr_fmax} == ${fmin}-${fmax} ]]; then
 			# update
@@ -361,6 +394,7 @@ groups_update()
 				export GR${idx}_cpus="$gr_cpus"
 				export GR${idx}_fmin=$gr_fmin
 				export GR${idx}_fmax=$gr_fmax
+				export GR${idx}_flst="$gr_flst"
 				export GR${idx}_govr=$gr_govr
 				idx=$(( idx + 1 ))
 			fi
@@ -368,12 +402,14 @@ groups_update()
 			gr_cpus=$cpu
 			gr_fmin=$fmin
 			gr_fmax=$fmax
+			gr_flst=$flst
 			gr_govr=$govr
 		fi
 	done
 	export GR${idx}_cpus="$gr_cpus" # flush last
 	export GR${idx}_fmin=$gr_fmin
 	export GR${idx}_fmax=$gr_fmax
+	export GR${idx}_flst="$gr_flst"
 	export GR${idx}_govr=$gr_govr
 	GR_NUM=$(( idx + 1 ))
 }
@@ -384,8 +420,10 @@ groups_print()
 		eval "gr_cpus=\$GR${idx}_cpus"
 		eval "gr_fmin=\$GR${idx}_fmin"
 		eval "gr_fmax=\$GR${idx}_fmax"
+		eval "gr_flst=\$GR${idx}_flst"
 		eval "gr_govr=\$GR${idx}_govr"
 		printf "%2s [%7s %7s] %11s %s\n" $idx $gr_fmin $gr_fmax $gr_govr "$gr_cpus"
+#		printf "   { %s }\n" "$gr_flst"
 		idx=$(( idx + 1 ))
 	done
 }
