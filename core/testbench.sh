@@ -892,6 +892,11 @@ parse_stdoutLog()
 		h265demo_v2)
 			fps=$(grep -i 'Encode speed:'   "$log" | tr -s ' ' | cut -d' ' -f 9)
 			fps=${fps%%fps}
+        ;;
+		h265demo_v3)
+            fps=$(grep -i 'Encode pure speed:'   "$log" | tr -s ' ' | cut -d' ' -f 4)
+#			fps=$(grep -i 'Encode speed:'   "$log" | tr -s ' ' | cut -d' ' -f 9)
+			fps=${fps%%fps*}
 		;;
 		h264demo)
 			fps=$(grep -i 'Tests completed' "$log" | tr -s ' ' | cut -d' ' -f 1)
