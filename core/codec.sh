@@ -20,17 +20,20 @@ windows_kingsoft="$dirBinWindows/kingsoft/AppEncoder_x64.exe"
 windows_intel="$dirBinWindows/intel/sample_encode.exe"
 windows_h265demo="$dirBinWindows/hw265/h265EncDemo.exe"
 windows_h265demo_v2="$dirBinWindows/hw265_v2/hw265app.exe"
+windows_h265demo_v3="$dirBinWindows/hw265_v3/hw265app.exe"
 windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
 
 dirBinAndroid="$dirScript/../bin/android"
 android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
 android_ks="$dirBinAndroid/ks/ks_encoder"
 android_h265demo="$dirBinAndroid/hw265/h265demo"
+android_h265demo_v3="$dirBinAndroid/hw265_v3/hw265app"
 android_x265="$dirBinAndroid/x265/x265"
 
 dirBinLinuxARM="$dirScript/../bin/linux-arm"
 linux_arm_h265demo="$dirBinLinuxARM/hw265/h265demo"
 linux_arm_h265demo_v2="$dirBinLinuxARM/hw265_v2/hw265app"
+linux_arm_h265demo_v3="$dirBinLinuxARM/hw265_v3/hw265app"
 linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
 linux_arm_x265="$dirBinLinuxARM/x265/x265"
 
@@ -48,6 +51,7 @@ codec_default_preset()
 		intel_*)	preset=faster;;
 		h265demo)	preset=5;;
 		h265demo_v2)preset=6;; # 2,3,5,6
+		h265demo_v3)preset=6;;
 		h264demo)	preset=-;;
 		*) error_exit "unknown encoder: $codecId";;
 	esac
@@ -513,6 +517,53 @@ cmd_h265demo_v2()
 	args="$args --wpp_threads $threads"
 	args="$args --profile 0"
 	args="$args --qualityset $preset"
+	REPLY=$args
+}
+
+exe_h265demo_v3() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_h265demo_v3;
+				 [[ $1 == adb     ]] && REPLY=$android_h265demo_v3;
+				 [[ $1 == ssh     ]] && REPLY=$linux_arm_h265demo_v3;
+				 return 0;
+}
+src_h265demo_v3() { REPLY="-i $1"; }
+dst_h265demo_v3() { REPLY="-b $1"; }
+cmd_h265demo_v3()
+{
+	local args= threads=1 res= fps= preset=6
+	while [[ "$#" -gt 0 ]]; do
+		case $1 in
+			-i|--input) 	args="$args -i $2";;
+			-o|--output) 	args="$args -b $2";;
+			   --res) 		res=$2;;
+			   --fps) 		fps=$2;;
+			   --preset) 	preset=$2;; # 2,3,5,6 <-> slow -> fast (default: 3)_
+			   --qp)        args="$args -rc 0 -qp $2";;
+			   --bitrate)   args="$args -rc 1 -br $2";;
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+	local width=${res%%x*}
+	local height=${res##*x}
+	args="$args -w $width"
+	args="$args -h $height"
+
+	args="$args -frames 0"
+	args="$args -channel 0"
+	args="$args -fps $fps"
+	args="$args -keyInt 500"
+	args="$args -bframes 0"
+	args="$args -bframe_ref 0"
+	args="$args -frame_threads 1"
+	args="$args -wpp_threads $threads"
+	args="$args -profile 0"
+	args="$args -qualityset $preset"
+	args="$args -psnr 0"
+	args="$args -svc 0"
+	args="$args -tnum 0"
+
 	REPLY=$args
 }
 
