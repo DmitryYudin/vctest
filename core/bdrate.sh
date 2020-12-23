@@ -1,19 +1,15 @@
 set -eu -o pipefail
 
-#
-# TODO: Evaluation bdrate for psnr-I.P looks suspicious since we use total bitrate, not a budget consumed by I/P
-# TODO: Add avgPSNR-Y/U/V to output statistics
-#
 dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
+
 . "$dirScript/utility_functions.sh"
+. "$dirScript/codec.sh"
 
-readonly dirScript=$(cygpath -m "$dirScript")
-readonly bdratePy=$(ospath "$dirScript")/bdrate/bdrate.py
-readonly KEY_DELIM="\(^\| \)" # line start or space
+readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 
-REF_CODEC=
-INPUT_LOG=
-KEYS=
+REPORT=bdrate.log
+REPDIR=report
+KEY=gPSNR
 
 usage()
 {
@@ -22,13 +18,23 @@ usage()
 	    $(basename $0) [opt]
 
 	Options:
-	    -h|--help     Print help.
-	    -i|--input    Input key/value log file to parse. Line with 'codecId:' are only considered.
-	    -k|--key      Key to use for BD-rate evaluation: gPSNR, psnrI, ... (default: gPSNR)
-	    -c|--codec    Reference codecId (default: first found)
+	    -h|--help        Print help.
+	    -o|--output  <x> Report path. Default: "$REPORT".
+	    -r|--repdir  <x> Performance report directory for 'testbench.sh'. Default: "$REPDIR".
+	    -k|--key     <x> Quality metric for BD-rate metric evaluation: gPSNR, gSSIM ...
+	    -c|--codec   <x> Codecs list. First item considered as the reference.
 
+	    Options different from above go to 'testbench.sh' script unchanged and applied to
+	    every codec run: -i -p --adb --ssh...
+
+	    Individual (per codec) parameters can be set with '-c' option
+
+	    Exactly 4 parameters for '-p' option must be set to evaluate bd-rate scores.
+    
 	Example:
-	    $(basename $0) -c x265 -i report_k2.kw
+	    $(basename $0) -i vec_720p_30fps.yuv -p'22 27 32 37' -c kingsoft -c 'kingsoft --preset ultrafast' 
+	    $(basename $0) -i vec_720p_30fps.yuv -p'700 1000 1400 2000' -c 'kingsoft x265 h265demo' 
+
 	EOF
 }
 
@@ -36,94 +42,159 @@ entrypoint()
 {
 	[[ "$#" -eq 0 ]] && usage && echo "error: arguments required" >&2 && return 1
 
-	while [[ "$#" -gt 0 ]]; do
-		case $1 in
-			-h|--help)		usage && return;;
-			-i|--input)     INPUT_LOG=$2;;
-			-k|--key)       KEYS="$KEYS $2";;
-			-c|--codec) 	REF_CODEC=$2;;
-			*) error_exit "unrecognized option '$1'"
-		esac
-		shift 2
+	local cmd_vec= cmd_codecs= cmd_report=$REPORT cmd_repdir=$REPDIR cmd_key=$KEY
+    local prev=
+	for arg do
+		case $arg in
+			-h|--help) usage; return;;
+        esac
+
+		shift
+        if [[ -z $prev ]]; then
+    		case $arg in
+    			-o|--out*) 		prev=$arg;;
+    			-r|--repdir)    prev=$arg;;
+			    -k|--key)       prev=$arg;;
+    			-c|--codec) 	prev=$arg;;
+    			*) set -- "$@" "$arg";;
+	    	esac            
+        else
+    		case $prev in
+    			-o|--out*) 		cmd_report=$arg;;
+    			-r|--rep*) 		cmd_repdir=$arg;;
+			    -k|--key)       cmd_key=$arg;;
+    			-c|--codec) 	cmd_codecs="$cmd_codecs; $arg";;
+	    	esac
+            prev=
+        fi
 	done
-	[[ -z "$INPUT_LOG" ]] && error_exit "input log file not set"
-	[[ -z "$KEYS" ]] && KEYS=gPSNR
 
-	local codec= codecs=
-	{
-		codecs=$(
-			cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:" | while read -r; do dict_getValue "$REPLY" codecId; echo "$REPLY"; done \
-				| sort -u --ignore-leading-blanks --ignore-case | tr $'\n' ' '
-		)
-		[[ -z "$codecs" ]] && error_exit "no codecs found"
-		if [[ -z "$REF_CODEC" ]]; then
-			for REF_CODEC in $codecs; do
-				break			
-			done
-			echo "warning: refCodec not set, select first from log '$REF_CODEC'" >&2
-		fi
+    local codecs_long
+    preproc_codec_list "$cmd_codecs"; codecs_long=$REPLY
 
-		local codec= found=
-		for codec in $codecs; do
-			[[ $codec == "$REF_CODEC" ]] && found=1
-		done
-		[[ -z "found" ]] && error_exit "$REF_CODEC not found in codecs list: $codecs"
-	}
+    mkdir -p "$cmd_repdir"
 
-	local src= vectors=
-	{
-		vectors=$(
-			cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:" | while read -r; do dict_getValue "$REPLY" SRC; echo "$REPLY"; done \
-				| sort -u --ignore-leading-blanks --ignore-case | tr $'\n' ' '
-		)
-	}
-	echo "codecs: $codecs" > /dev/tty
-	echo "vectors: $vectors" > /dev/tty
+    # Encode (generate logs)
+    local codec_long
+    local oldIFS=$IFS IFS=';'
+    for codec_long in $codecs_long; do
+        IFS=$oldIFS
+        local codec=${codec_long%% *}
+        local prms=${codec_long#$codec}; prms=${prms# }
+        local tag
+        get_codec_tag "$codec_long"; tag=$REPLY
+        local report="${cmd_repdir}/bdrate_${timestamp}_${tag}.log"
+        "$dirScript/testbench.sh" -c "$codec" $prms -o "$report" "$@"
+    done
+    IFS=$oldIFS
 
-	for codec in $codecs; do
-	for src in $vectors; do
-		local report=
-		for key in $KEYS; do
-			local refData= tstData=
-			{
-				refData=$(
-					cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:$REF_CODEC[ $]" | grep -i "${KEY_DELIM}SRC:$src[ $]" | \
-						while read -r; do 
-							dict=$REPLY
-							dict_getValue "$dict" kbps; kbps=$REPLY
-							dict_getValue "$dict" $key; psnr=$REPLY
-							echo "--ref $kbps,$psnr"
-						done | \
-						tr $'\n' ' '
-				)
-			}
-	    
-			[[ $codec == "$REF_CODEC" ]] && continue
-			tstData=$(
-				cat "$INPUT_LOG" | grep -i "${KEY_DELIM}codecId:$codec[ $]" | grep -i "${KEY_DELIM}SRC:$src[ $]" | \
-					while read -r; do 
-						dict=$REPLY
-						dict_getValue "$dict" kbps; kbps=$REPLY
-						dict_getValue "$dict" $key; psnr=$REPLY
-						echo "--tst $kbps,$psnr"
-					done | \
-					tr $'\n' ' '
-			)
-			local result= bdRate= bdPSNR=
-			result=$(python $bdratePy $refData $tstData)
-			dict_getValue "$result" BD-rate; bdRate=$REPLY
-			dict_getValue "$result" BD-PSNR; bdPSNR=$REPLY
-			printf -v report "%s BD-rate($key):%-6.2f BD-PSNR($key):%-6.2f" "$report" "$bdRate" "$bdPSNR"
-		done
-		report=${report# }
-        local res=
-        detect_resolution_string "$src"; res=$REPLY
-		if [[ -n "$report" ]]; then
-			printf "ref:%-13s tst:%-13s %-9s $report SRC:%s\n" "$REF_CODEC" "$codec" "$res" "$src"
-		fi
-	done
-	done
+    # Filter-out reference codec (first in list)
+    local ref_codec_long=${codecs_long%%;*}; codecs_long=${codecs_long#$ref_codec_long;}
+    local ref_codec=${ref_codec_long%% *}
+    local ref_prms=${ref_codec_long#$ref_codec}; ref_prms=${ref_prms# }
+    local ref_tag=    
+    get_codec_tag "$ref_codec_long"; ref_tag=$REPLY
+    local ref_report="${cmd_repdir}/bdrate_${timestamp}_${ref_tag}.log"
+    local ref_kw_log="${ref_report%.*}.kw"
+
+    # Make sure we have valid data
+    if ! grep -m 1 'codecId:' "$ref_kw_log" >/dev/null; then
+        error_exit "no date for reference codec '$ref_codec_long'"
+    fi
+
+    # Calcultate BD-rate
+    local info
+    get_test_info "$@"; info=$REPLY
+
+    echo "" >> $cmd_report
+    local oldIFS=$IFS IFS=';'
+    for codec_long in $codecs_long; do
+        IFS=$oldIFS
+        local codec=${codec_long%% *}
+        local prms=${codec_long#$codec}; prms=${prms# }
+        local tag
+        get_codec_tag "$codec_long"; tag=$REPLY
+        local report="${cmd_repdir}/bdrate_${timestamp}_${tag}.log"
+        local kw_log="${report%.*}.kw"
+        echo "$timestamp ref:$ref_codec[$ref_prms] tst:$codec[$prms] KEY=$cmd_key [$info]" | tee -a "$cmd_report"
+        # Make sure we have valid data
+        if ! grep -m 1 'codecId:' "$kw_log" > /dev/null ; then
+            echo "no data, skip" | tee -a "$cmd_report"
+            continue;
+        fi
+        "$dirScript/bdrate/bdrate.sh" -i "$ref_kw_log" -i "$kw_log" --key "$cmd_key" | tee -a "$cmd_report"
+    done
+    IFS=$oldIFS
 }
 
+get_codec_tag()
+{
+    local codec_long=$1; shift
+    local codec=${codec_long%% *}
+    local prms=${codec_long#$codec}
+    prms=${prms# }
+    [[ -n "$prms" ]] &&  prms="$(echo "$prms" | tr ' ' '_')"
+    REPLY="$codec${prms:+[$prms]}"
+}
+
+preproc_codec_list()
+{
+    local codecs=$1; shift
+
+    # shrink spaces
+    codecs=$(echo "$codecs" | tr -s "[:space:]")
+
+    local known_codecs
+    codec_get_knownId; known_codecs=$REPLY
+
+    # remove possible delimiters
+    codecs=$(echo "$codecs" | tr -d ';')
+
+    # preppend codecId with delimiter
+    local token known_codec retval=
+    for token in $codecs; do
+        local found=false
+        for known_codec in $known_codecs; do
+            [[ $token == $known_codec ]] && found=true
+        done
+        $found && retval="$retval;$token" || retval="$retval $token";
+    done
+    retval=${retval#;}
+    codecs=$retval
+
+    # remove duplicates and extra spaces
+    local oldIFS=$IFS IFS=';' token retval=
+    for token in $codecs; do
+        IFS=$oldIFS
+        local x="$token" unique= found=false
+        x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}
+        for unique in $retval; do
+            [[ $x == $unique ]] && found=true && break
+        done
+        $found && continue
+        retval="$retval;$x"
+    done
+    IFS=$oldIFS
+   	retval=${retval#;}
+    REPLY=$retval
+}
+
+get_test_info()
+{
+    # filter all, but '-i' option from input list
+    local prev=
+	for arg do
+		shift
+        if [[ -z $prev ]]; then
+    		case $arg in
+    			-i|--in*) 		prev=$arg;;
+    			*) set -- "$@" "$arg";;
+	    	esac            
+        else
+            prev=
+        fi
+	done
+    REPLY=$(echo "$*" | tr -s "[:space:]")
+}
 
 entrypoint "$@"

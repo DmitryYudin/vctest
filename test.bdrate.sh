@@ -2,10 +2,11 @@ set -eu -o pipefail
 
 # first codec used as the reference
 #CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
-CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo"
+#CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo"
+CODECS="kingsoft; kingsoft --preset ultrafast; kingsoft --preset superfast; kingsoft --preset fast"
 
 # 4 point required
-case 1 in
+case 0 in
 	0)	PRMS=" 60    80  120   150"
 		VECTORS="akiyo_qcif.yuv foreman_qcif.yuv" # fast check
 	;;
@@ -19,14 +20,6 @@ case 1 in
 		"
 	;;
 esac
-
-readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-readonly report="report/bdrate_$timestamp.log"
-
-# Generate logs
 VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
-./core/testbench.sh -i "$VECTORS" -c "$CODECS" -p "$PRMS" -o "$report" "$@"
 
-# Calcultate BD-rate
-echo "$timestamp PRMS=[$PRMS] $*" >> bdrate.log
-./core/bdrate.sh -c ${CODECS%% *} -i ${report%.*}.kw | tee -a bdrate.log
+./core/bdrate.sh -i "$VECTORS" -c "$CODECS" -p "$PRMS" -o "bdrate.log" -r "report" "$@"

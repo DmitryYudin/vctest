@@ -1,5 +1,5 @@
 #
-# For the sourcing. 
+# For the sourcing.
 #
 # All exported functions are prefixed with "codec_".
 #
@@ -37,11 +37,21 @@ linux_arm_h265demo_v3="$dirBinLinuxARM/hw265_v3/hw265app"
 linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
 linux_arm_x265="$dirBinLinuxARM/x265/x265"
 
+codec_get_knownId()
+{
+    REPLY=
+    REPLY="$REPLY ashevc x265 kvazaar"
+    REPLY="$REPLY kingsoft ks"
+    REPLY="$REPLY intel_sw intel_hw"
+    REPLY="$REPLY h265demo h265demo_v2 h265demo_v3"
+    REPLY="$REPLY h264demo"
+    REPLY=${REPLY# }
+}
+
 codec_default_preset()
 {
 	local codecId=$1; shift
 	local preset=
-
 	case $codecId in
 		ashevc) 	preset=1;;
 		x265) 		preset=ultrafast;;
@@ -55,7 +65,6 @@ codec_default_preset()
 		h264demo)	preset=-;;
 		*) error_exit "unknown encoder: $codecId";;
 	esac
-
 	REPLY=$preset
 }
 codec_exe()
@@ -212,8 +221,8 @@ cmd_x265()
 	args="$args --pools $threads"  # TODO
 	args="$args --ref 1"           # Num reference frames
 	args="$args --bframes 0"       # Disable B-frames
-	args="$args --frame-threads 1" # Number of concurrently encoded frames. 
-	args="$args --rc-lookahead 0"  # Number of frames for frame-type lookahead 
+	args="$args --frame-threads 1" # Number of concurrently encoded frames.
+	args="$args --rc-lookahead 0"  # Number of frames for frame-type lookahead
 #	args="$args --tune psnr"       # Enable "--tune psnr" produce worse gPSNR for tears_of_steel_1728x720_24.webm.yuv@1M
 	args="$args --psnr"
 	args="$args --ssim"
