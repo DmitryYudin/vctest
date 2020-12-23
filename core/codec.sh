@@ -37,6 +37,17 @@ linux_arm_h265demo_v3="$dirBinLinuxARM/hw265_v3/hw265app"
 linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
 linux_arm_x265="$dirBinLinuxARM/x265/x265"
 
+codec_get_knownId()
+{
+    REPLY=
+    REPLY="$REPLY ashevc x265 kvazaar"
+    REPLY="$REPLY kingsoft ks"
+    REPLY="$REPLY intel_sw intel_hw"
+    REPLY="$REPLY h265demo h265demo_v2 h265demo_v3"
+    REPLY="$REPLY h264demo"
+    REPLY=${REPLY# }
+}
+
 codec_default_preset()
 {
 	local codecId=$1; shift
