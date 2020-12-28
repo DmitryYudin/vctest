@@ -3,8 +3,9 @@
 # Licensed under the Apache License, Version 2.0
 #
 
-: ${__CURL_OPT="--connect-timeout 10 --location -k --silent --show-error"}
-DONWLOAD_BACKEND=${1-ps}
+: ${__CURL_OPT="--location -k --silent --show-error"}
+URL_BACKEND=${1-ps}
+URL_TIMEOUT_SEC=
 
 if [[ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]]; then
 
@@ -17,12 +18,14 @@ usage()
 
 	This script is primarily intended for a sourcing.
 
-	    . url.sh curl <- BACKEND
-	              v v v
+	    . url.sh
+
+	    URL_set_backend curl # or 'ps'
+
 	    if info=$(URL_info "$url"); then
 	        size=$(echo "$info" | cut -d' ' -f1)
 	        name=$(echo "$info" | cut -d' ' -f4)
-	              v v v
+
 	        URL_download "$url" "$DIR_OUR/$name"
 	    fi
 
@@ -56,8 +59,8 @@ entrypoint()
 		shift
 		case "$arg" in
 			-h|--help) usage; return;;
-			--curl) DONWLOAD_BACKEND=curl; backend=true;;
-			--ps) DONWLOAD_BACKEND=ps; backend=true;;
+			--curl) URL_BACKEND=curl; backend=true;;
+			--ps) URL_BACKEND=ps; backend=true;;
 			--head) task=1;;
 			--force) task=2;;
 			--info) task=3;;
@@ -110,12 +113,12 @@ entrypoint()
 
 			if [[ -n "$backend" ]]; then
 				x=$(URL_info "$url" "$@" --format)
-				printf "%s: %-55s %s\n" "$DONWLOAD_BACKEND" "$x" "$url_short"
+				printf "%s: %-55s %s\n" "$URL_BACKEND" "$x" "$url_short"
 			else
 				for i in curl ps; do
-					DONWLOAD_BACKEND=$i
+					URL_BACKEND=$i
 					x=$(URL_info "$url" "$@" --format)
-					printf "%4s: %-55s %s\n" "$DONWLOAD_BACKEND" "$x" "$url_short"
+					printf "%4s: %-55s %s\n" "$URL_BACKEND" "$x" "$url_short"
 				done
 			fi
 		done 
@@ -139,6 +142,21 @@ __execute_script_ps()
 }
 
 __urldecode() { local x=${*//+/ }; printf "${x//%/\\x}"; }
+
+URL_set_backend()
+{
+    local backend=$1; shift
+    case $backend in
+        curl) URL_BACKEND=curl;;
+        ps)   URL_BACKEND=ps;;
+        *)    echo "error: unknown backend '$backend'" 1>&2 && return 1
+    esac    
+}
+
+URL_set_timeout_sec()
+{
+    URL_TIMEOUT_SEC=$1
+}
 
 ####################################
 #  Info
@@ -241,7 +259,7 @@ URL_info()
 ####################################
 URL_headers()
 {
-	if [[ "$DONWLOAD_BACKEND" == ps ]]; then
+	if [[ "$URL_BACKEND" == ps ]]; then
 		URL_headers_ps_WebRequest "$@"
 	else
 		URL_headers_curl "$@"
@@ -249,7 +267,7 @@ URL_headers()
 }
 URL_headers_FORCE()
 {
-	if [[ "$DONWLOAD_BACKEND" == ps ]]; then
+	if [[ "$URL_BACKEND" == ps ]]; then
 		URL_headers_ps_WebClient "$@"
 	else
 		if ! URL_headers_curl "$@"; then
@@ -259,13 +277,14 @@ URL_headers_FORCE()
 }
 URL_headers_curl()	# only headers
 {
-	curl $__CURL_OPT -L -I "$@"
+	curl $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC} -L -I "$@"
 }
 URL_headers_curl_FORCE() # start download
 {
 	local stderr=$(mktemp url_headers.XXXXXX)
 	set +e; # note, with --max-filesize curl doesn't print 'Content-Length' header
-	curl $__CURL_OPT -L "$@" --max-time 5 --limit-rate 10K --dump-header - -o . 2>"$stderr"
+	curl $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC} -L "$@" \
+        --max-time 5 --limit-rate 10K --dump-header - -o . 2>"$stderr"
 	local error_code=$?
 	set -e
 	case $error_code in
@@ -363,7 +382,7 @@ URL_headers_ps_WebClient()
 ####################################
 URL_download()
 {
-	if [[ "$DONWLOAD_BACKEND" == ps ]]; then
+	if [[ "$URL_BACKEND" == ps ]]; then
 		URL_download_ps "$@"
 	else
 		URL_download_curl "$@"
@@ -374,7 +393,7 @@ URL_download_curl()
 {
 	local url=$1; shift
 	local dst=$1; shift
-	curl $__CURL_OPT -o "$dst" "$url"
+	curl $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC} -o "$dst" "$url"
 }
 
 URL_download_ps()
