@@ -456,9 +456,11 @@ jobsRunTasks()
 	[[ ! -f "$taskTxt" ]] && { echo "error: task file $taskTxt does not exist" >&2 && return 1; }
 
     # set term width
-	if [[ -z "${COLUMNS:-}" ]]; then
-		case ${OS:-} in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2) && export COLUMNS; esac
-	fi
+	if [[ -z ${COLUMNS:-} ]]; then
+		case ${OS:-} in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2); esac
+        [[ -z ${COLUMNS:-} ]] && command -v tput >/dev/null 2>&1 && COLUMNS=$(tput cols)
+        [[ -n ${COLUMNS:-} ]] && export COLUMNS
+    fi
 
 	# Get last cpu index. We are going to use NCPU-1 cores to run
 	if [[ "$runMax" -le 0 ]]; then
