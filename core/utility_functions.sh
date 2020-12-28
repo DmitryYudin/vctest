@@ -4,7 +4,7 @@
 error_exit()
 {
 	local src="${BASH_SOURCE[1]}"; src=${src//\\//}; src=${src##*/}; src=${src%.*}
-	printf "$src:${FUNCNAME[1]}():${BASH_LINENO[0]} error: %s\n" "$*" >&2 
+	printf "\n$src:${FUNCNAME[1]}():${BASH_LINENO[0]} error: %s\n" "$*" >&2 
 	exit 1
 }
 
@@ -76,36 +76,71 @@ list_size()
 }
 
 # Works as print not 'echo', i.e. does not insert 'eol' character at the end of string.
-# Only takes care about '\n' and '\r' trailing charactrs (i.e. single line output only)
 # Does not pretend to cover all use cases (non-printable characters, etc)
+# We do not track actuall output position. Assume the printing starts from line start.
 print_console()
 {
-	cut_to_console_width()
-	{
-		if [[ -z "${COLUMNS:-}" ]]; then
+	cut_to_console_width() {
+		if [[ -z ${COLUMNS:-} ]]; then
 			case ${OS:-} in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2) && export COLUMNS; esac
 		fi
 
 		# Note, Windows terminal inserts carriage character after printed string
 		# this results in line break if len(str) == NUM_COLUMNS. So we cut to NUM_COLUMNS-1 length
 		REPLY=$*
-		[[ -n "${COLUMNS:-}" && "${#REPLY}" -ge "${COLUMNS:-}" ]] && REPLY="${REPLY:0:$((COLUMNS - 5))}..."
-
-		return 0
+        # remove trailing spaces since we output to console
+        REPLY=${REPLY%"${REPLY##*[! $'\t']}"}
+        if [[ -n ${COLUMNS:-} && ${#REPLY} -ge ${COLUMNS:-} ]]; then
+            # cut
+            REPLY=${REPLY:0:$((COLUMNS - 6))}
+            # remove spaces again
+            REPLY=${REPLY%"${REPLY##*[! $'\t']}"}
+            REPLY=$REPLY...
+        fi
 	}
-	# catch endings we do not want to cut
-	local str=$* nl= cr= line_clear=
-	str=${str//"\r"/$'\r'}
-	str=${str//"\n"/$'\n'}
-#	[[ "${str: -1}" == $'\r' ]] && str=${str%$'\r'} && cr=1
-	[[ "${str: -1}" == $'\r' ]] && str=${str%$'\r'} && cr=1
-	[[ "${str: -1}" == $'\n' ]] && str=${str%$'\n'} && nl=1
+    print_console_single_line() {        
+        local str=$1 nl=$2
+        # catch '\r' at the end and start of the line
+        local cr_end=;   [[ ${str: -1} == $'\r' ]] && str=${str%$'\r'} && cr_end=1
+        local cr_start=; [[ ${str:0:1} == $'\r' ]] && str=${str#$'\r'} && cr_start=1
+    	cut_to_console_width "$str"; str=$REPLY
+        # cleare entire line
+        [[ -n $cr_start || -n ${GLOBAL_DO_LINE_CLEAR:-} ]] && str="\\x1B[2K\r$str"
+        # append new line character
+        [[ -n $nl ]] && str="$str\n"
+        printf "$str" > /dev/tty
+        # set LINE_CLEAR flag for the next line
+        GLOBAL_DO_LINE_CLEAR=
+        [[ -n $cr_end ]] && GLOBAL_DO_LINE_CLEAR=1
+        return 0
+    }
+    local str nl_last=
+    printf -v str "$@"
+    [[ ${str: -1} == $'\n' ]] && nl_last=1
 
-	cut_to_console_width "$str"; str=$REPLY
+    # prepend with witespace since we do not want empty lines lost: '\n\n'
+    str=${str//$'\n'/ $'\n'}
+    # debug
+    #str=${str//$'\r'/$'\n'}
 
-	[[ -n "$nl" ]] && str="$str"$'\n'
-	[[ -n "$cr" ]] && str="$str"$'\r' && line_clear="\\x1B[2K"
-	printf "$line_clear%s" "$str" > /dev/tty
+    local IFS=$'\n'
+    set -- $str
+    for str do
+        shift
+        # remove added whitespace at the end of line
+        str=${str% }
+        local nl=1; [[ $# == 0 ]] && nl=$nl_last
+        print_console_single_line "$str" "$nl"
+    done
+
+<< UT
+    print_console "aaa\nbbb ccc\n"
+    print_console "very long line                                                                 ends here\nshort line\n"
+    print_console "\n\n"
+    print_console "invisible\rpause, ending must be cleared on next line\r"
+    sleep 1s
+    print_console "ddd\n"
+UT
 }
 
 # This also works for files, but we need dirs only
@@ -130,11 +165,12 @@ detect_resolution_string()
 	local filename=$1; shift
 	local name=${filename//\\/}; name=${name##*[/\\]}; name=${name%%.*}
 	local res=
+    local oldIFS=$IFS
 
 	# X -> x
 	name=${name//X/x}
 
-	# try HxW pattern delimited by "." or "_"
+	# try WxH pattern delimited by "." or "_"
 	for delim in _ .; do
 		local IFS=$delim
 		for i in $name; do
@@ -144,6 +180,7 @@ detect_resolution_string()
 		done
 		[[ -n "$res" ]] && break
 	done
+	IFS=$oldIFS
 	[[ -n "$res" ]] && REPLY=$res && return
 
 	# try abbreviations CIF, QCIF, ... delimited by "." or "_"
@@ -181,6 +218,7 @@ detect_resolution_string()
 			esac
 			[[ -n "$res" ]] && break
 		done
+	    IFS=$oldIFS		
 		[[ -n "$res" ]] && break
 	done
 	[[ -n "$res" ]] && REPLY=$res && return
