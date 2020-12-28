@@ -40,29 +40,29 @@ usage()
 	    --test    - Same as '--info' but for predefined list of URLs
 	                or URL read from the file, one url per file
 	Examples:
-	    script https://github.com/git-for-windows/git-sdk-32/tarball/master
-	    script --get http://releases.llvm.org/9.0.0/LLVM-9.0.0-win32.exe out.bin
-	    script --test
-	    script --test URLs.txt
+	    url.sh https://github.com/git-for-windows/git-sdk-32/tarball/master
+	    url.sh --get http://releases.llvm.org/9.0.0/LLVM-9.0.0-win32.exe out.bin
+	    url.sh --test
+	    url.sh --test URLs.txt
 
 	EOF
 }
 
 entrypoint()
 {
-	[[ "$#" == 0 ]] && usage 1>&2 && return 1
+	[[ $# == 0 ]] && usage 1>&2 && return 1
 	local backend="" task=3
 	for arg do
 		shift
 		case "$arg" in
-			--help) usage; return;;
+			-h|--help) usage; return;;
 			--curl) DONWLOAD_BACKEND=curl; backend=true;;
 			--ps) DONWLOAD_BACKEND=ps; backend=true;;
 			--head) task=1;;
 			--force) task=2;;
 			--info) task=3;;
 			--get) task=4;;
-			--test) task=5;;
+			-t|--test) task=5;;
 			*) set -- "$@" "$arg";;
 		esac
 	done
@@ -77,8 +77,8 @@ entrypoint()
 		URL_download "$@"
 	else
 		local URLs=
-		if [[ "$#" != 0 ]]; then
-			local url_list="$1"
+		if [[ $# != 0 ]]; then
+			local url_list=$1
 			URLs=$(cat "$url_list" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/#.*//' | paste)
 			shift
 		else
@@ -101,11 +101,11 @@ entrypoint()
 			fi
 		fi
 		for url in $URLs; do
-			local url_short="$url"
+			local url_short=$url
 			if [[ $wmax -gt 0 && ${#url} -gt $wmax ]]; then
 				local tail=$(( wmax - 15 - 3))
 				url_short=${url_short#*://}
-			 	[[ $tail -gt 0 ]] && url_short="${url_short:0:15}...${url_short: -$tail}"
+			 	[[ $tail -gt 0 ]] && url_short=${url_short:0:15}...${url_short: -$tail}
 			fi
 
 			if [[ -n "$backend" ]]; then
@@ -127,8 +127,8 @@ fi
 
 __execute_script_ps()
 {
-	local context="$1"; shift
-	local script="$1"; shift
+	local context=$1; shift
+	local script=$1; shift
 	if [[ "$context" == back ]]; then
 		powershell -nologo -executionpolicy bypass -c "& $script "$@"" &
 		wait $!
@@ -138,7 +138,7 @@ __execute_script_ps()
 	fi
 }
 
-__urldecode() { local x="${*//+/ }"; printf "${x//%/\\x}"; }
+__urldecode() { local x=${*//+/ }; printf "${x//%/\\x}"; }
 
 ####################################
 #  Info
@@ -146,23 +146,21 @@ __urldecode() { local x="${*//+/ }"; printf "${x//%/\\x}"; }
 filename_from_disposition()
 {
 	# exp: 'attachment; filename=aria2-1.35.0-win-32bit-build1.zip'
-	local data="$1"
+	local data=$1
 	local data=${data//;/ } # ';' -> ' '
 	local x
 	for x in $data; do
-		if echo "$x" | grep -q -i 'filename='; then
-			x=${x#*=}
-			x=${x#\"}
-			x=${x%\"}
-			echo "$x"
-			return
-		fi
+        REPLY=${x#*filename=}
+        if [[ "$x" != $REPLY ]]; then
+            REPLY=${REPLY#\"}
+            REPLY=${REPLY%\"}
+        fi
 	done
-	return 1
+    REPLY=
 }
 filename_from_location_PRMS()
 {
-	local url="$1"
+	local url=$1
 	local opt=$(echo "$url" | cut -s -d'?' -f2-)
 	opt=${opt//&/ } # '&' -> ' '
 	local x
@@ -172,48 +170,42 @@ filename_from_location_PRMS()
 		# exp: 'attachment; filename=aria2-1.35.0-win-32bit-build1.zip'
 		if echo "$key" | grep -q -i 'content-disposition'; then
 			val="$(__urldecode "$val")"
-			if filename_from_disposition "$val"; then
-				return
-			fi
+			filename_from_disposition "$val"
+            [[ -n "$REPLY" ]] && return
 		fi
 	done
-	return 1
+    REPLY=
 }
 filename_from_url() # <=> extention(basename($url)) != empty
 {
-	local url="$1"
-	local name="${url%%\?*}" 	# xxx?***
-	name="${name##*/}"  		# ***/***/xxx
-	local ext="${name##*.}" 	# ***.xxx
-	if [[ "$name" != "$ext" ]]; then
-		echo "$name"
-	else
-		return 1
-	fi
+	local url=$1
+	local name=${url%%\?*} 	# xxx?***
+	name=${name##*/}  		# ***/***/xxx
+    REPLY=${name}
 }
 URL_info()
 {
 	local arg format=""
 	for arg do
 		shift
-		[[ "$arg" == "--format" ]] && format=true && continue
+		[[ "$arg" == --format ]] && format=true && continue
 		set -- "$@" "$arg"
 	done
 
-	local url="$1"
+	local url=$1
 	local headers dis src
 	headers=$(URL_headers "$@")
 
-	if 		dis="$(echo "$headers" | grep -i 'Location:' | tail -n1)" &&
-			dis="$(filename_from_location_PRMS "$dis")"; then
+	if 		dis=$(echo "$headers" | grep -i 'Location:' | tail -n1) &&
+			filename_from_location_PRMS "$dis" && [[ -n "$REPLY" ]] && dis=$REPLY; then
 			src=PRM
-	elif 	dis="$(echo "$headers" | grep -i 'Content-Disposition:' | tail -n1)" &&
-			dis="$(filename_from_disposition "$dis")"; then
+	elif 	dis=$(echo "$headers" | grep -i 'Content-Disposition:' | tail -n1) &&
+			filename_from_disposition "$dis" && [[ -n "$REPLY" ]] && dis=$REPLY; then
 			src=HDR
-	elif	dis="$(filename_from_url "$url")"; then
+	elif	filename_from_url "$url" && [[ -n "$REPLY" ]] && dis=$REPLY; then
 			src=url
-	elif	dis="$(echo "$headers" | grep -i 'Location:' | tail -n1)" &&
-			dis="$(filename_from_url "$dis")"; then
+	elif	dis=$(echo "$headers" | grep -i 'Location:' | tail -n1) &&
+			filename_from_url "$dis" && [[ -n "$REPLY" ]] && dis=$REPLY; then
 			src=loc
    	else
 			echo "error: can't detect filename for '$url'" 1>&2
@@ -221,14 +213,15 @@ URL_info()
 	fi
 
 	local len
-	if ! len="$(echo "$headers" | grep -i 'Content-Length:' | tail -n1 | cut -s -d' ' -f2)"; then
+	if ! len=$(echo "$headers" | grep -i 'Content-Length:' | tail -n1 | cut -s -d' ' -f2); then
 		headers=$(URL_headers_FORCE "$@")
-		if ! len="$(echo "$headers" | grep -i 'Content-Length:' | tail -n1 | cut -s -d' ' -f2)"; then
+		if ! len=$(echo "$headers" | grep -i 'Content-Length:' | tail -n1 | cut -s -d' ' -f2); then
 			len=0
 		fi
 	fi
+    [[ -z "$headers" ]] && len=0
 
-	local suff="B" num=1
+	local suff=B num=1
 	[[ $len -ge       1000 ]] && suff="K" &&        num=1000
 	[[ $len -ge    1000000 ]] && suff="M" &&     num=1000000
 	[[ $len -ge 1000000000 ]] && suff="G" &&  num=1000000000
@@ -259,7 +252,9 @@ URL_headers_FORCE()
 	if [[ "$DONWLOAD_BACKEND" == ps ]]; then
 		URL_headers_ps_WebClient "$@"
 	else
-		URL_headers_curl_FORCE "$@"
+		if ! URL_headers_curl "$@"; then
+    		URL_headers_curl_FORCE "$@"
+        fi
 	fi
 }
 URL_headers_curl()	# only headers
@@ -292,7 +287,7 @@ URL_headers_curl_FORCE() # start download
 #-(<      -= All other reasons are for the hate =-
 URL_headers_ps_WebRequest()
 {
-	local url="$1"
+	local url=$1
 	local script=$(cat <<-'SCRIPT'
 		{
 	    	Param([Uri] $url)
@@ -338,7 +333,7 @@ URL_headers_ps_WebClient()
 	# + As usual, provides 'content-length' header we fail to get with curl 
 	#	and WebRequest. Most likely, WebClient starts downloading then stops.
    	# - This hangs user process. User script should (good to) execute it in a backgound.
-	local url="$1"
+	local url=$1
 	local script=$(cat <<-'SCRIPT'
 		{
 	    	Param([Uri] $url)
@@ -377,26 +372,30 @@ URL_download()
 
 URL_download_curl()
 {
-	local url="$1"; shift
-	local dst="$1"; shift
+	local url=$1; shift
+	local dst=$1; shift
 	curl $__CURL_OPT -o "$dst" "$url"
 }
 
 URL_download_ps()
 {
-	local url="$1"; shift
-	local dst="$1"; shift
+	local url=$1; shift
+	local dst=$1; shift
 	local script_show_proxy=$(cat <<-'SCRIPT'
+        {
             try {
+                $url='http://google.com'
 				$progressPreference = 'silentlyContinue' 
 				$ErrorActionPreference = 'Stop';
 				$proxy = [System.Net.WebRequest]::GetSystemWebProxy();
 				if ($proxy) {
 					$proxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials;
-					$proxyUrl = $proxy.GetProxy("google.com");
-					if ($proxyUrl) {
-    	        		Write-Host "proxy: $proxyUrl";
-					}
+					$proxyUrl = $proxy.GetProxy($url);
+					if ($proxyUrl -eq $url) {
+    	        		Write-Host "url.sh: no proxy";
+					} else {
+    	        		Write-Host "url.sh: using proxy $proxyUrl";
+                    }
 				}
 			} catch {
 				Write-Output $_;
@@ -421,9 +420,8 @@ URL_download_ps()
 				} else {
 					$proxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials;
 					$proxyUrl = $proxy.GetProxy("$url");
-            		Write-Host "using proxy: $proxyUrl";
-					Invoke-WebRequest -Uri $url -OutFile $dst -UseDefaultCredentials \
-						-Proxy "$proxyUrl" -ProxyUseDefaultCredentials;
+            #		Write-Host "using proxy: $proxyUrl";
+					Invoke-WebRequest -Uri $url -OutFile $dst -UseDefaultCredentials -Proxy "$proxyUrl" -ProxyUseDefaultCredentials;
 				}
 			} catch {
 				Write-Output $_;
@@ -435,7 +433,6 @@ URL_download_ps()
 	# this hangs user script but known work with proxy well
 	# 40Mb of 51Mb downloaded : http://repo.msys2.org/distrib/msys2-x86_64-latest.tar.xz
 	# with an exit code of '0' - do not know what to do !!!
-	# Can't handle redirect.
 	local script2=$(cat <<-'SCRIPT'
 		{
 	    	Param([Uri] $url, $dst)
@@ -445,19 +442,19 @@ URL_download_ps()
 				$c.Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials;
 				$c.DownloadFile($url, $dst);
 			} catch {
-            	# Write-Output $_;
+            	Write-Output $_;
 				exit 1
 			}
 		}
 		SCRIPT
 	)
 
-	if [[ ${SHOW_PROXY-:0} == 0 ]]; then
+	if [[ ${SHOW_PROXY:-0} == 0 ]]; then
 		__execute_script_ps front "$script_show_proxy"
 		export SHOW_PROXY=1
 	fi
-	__execute_script_ps front "$script" "$url" "$dst"
-	#__execute_script_ps back "$script2" "$url" "$dst"
+	#__execute_script_ps front "$script" "$url" "$dst"
+	__execute_script_ps back "$script2" "$url" "$dst"
 }
 
 if [[ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]]; then
