@@ -7,7 +7,6 @@ PRMS="1500"
 VECTORS=""
 VECTORS="$VECTORS FourPeople_1280x720_30.y4m.yuv"
 VECTORS="$VECTORS stockholm_ter_1280x720_30.y4m.yuv"
-VECTORS=$(for i in $VECTORS; do echo "../vectors/$i"; done)
 
 get_preset_list()
 {

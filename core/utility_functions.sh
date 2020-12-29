@@ -108,6 +108,15 @@ print_console()
 	printf "$line_clear%s" "$str" > /dev/tty
 }
 
+# This also works for files, but we need dirs only
+normalized_dirname() # TODO: alternatives if realpath does not exist
+{
+    local dirname=$1; shift
+    # cd "$dirname" >/dev/null 2>&1 && pwd
+    realpath $dirname 2>/dev/null
+    # readlink -m "$dirname"
+}
+
 detect_resolution_string()
 {	
 	local filename=$1; shift
@@ -166,9 +175,19 @@ detect_resolution_string()
 		done
 		[[ -n "$res" ]] && break
 	done
-	[[ -z "$res" ]] && error_exit "can't detect resolution $filename"
+	[[ -n "$res" ]] && REPLY=$res && return
 
-	REPLY=$res
+	# try W_H_FPS pattern
+    local moviename=${name%%_[1-9]*}
+    local patt=${name#$moviename}; patt=${patt#_}
+	if [[ $patt =~ ^[1-9][0-9]{1,3}_[1-9][0-9]{1,3}_[1-9][0-9]{0,1}$ ]]; then
+        local width=${patt%%_*}
+        local height=${patt#*_}; height=${height%%_*}
+		res=${width}x${height}
+	fi
+	[[ -n "$res" ]] && REPLY=$res && return
+
+	[[ -z "$res" ]] && error_exit "can't detect resolution $filename"
 }
 
 detect_framerate_string()
