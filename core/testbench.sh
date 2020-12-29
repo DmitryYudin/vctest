@@ -103,7 +103,7 @@ entrypoint()
 	[[ $THREADS -gt 1 ]] && NCPU=1
 
 	if $remote; then
-		TARGET_setTarget $target remote.local
+		TARGET_setTarget $target "$dirScript"/../remote.local
 		TARGET_getFingerprint; targetInfo=$REPLY
 	fi
 	if [[ -n "$cmd_endofflags" ]]; then
