@@ -1,32 +1,33 @@
 set -eu -o pipefail
 
-case 1 in
-	0)	BITRATE=80;   VECTORS="akiyo_qcif.yuv";; # fast check
-	1)	BITRATE=1000; VECTORS=tears_of_steel_1280x720_24.webm.yuv
-esac
+CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
+
+PRMS="1500"
+
+VECTORS=""
+VECTORS="$VECTORS FourPeople_1280x720_30.y4m.yuv"
+VECTORS="$VECTORS stockholm_ter_1280x720_30.y4m.yuv"
 VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
 
-HIDE_BANNER=
-encode() {
-	./core/testbench.sh -i "$VECTORS" -c "$codec" -p "${QP:-} ${BITRATE:-}" --preset "$PRESET" \
-		-o report/preset.log ${HIDE_BANNER:+ --hide} "$@"
-	HIDE_BANNER=1
+get_preset_list()
+{
+    case $1 in
+        ashevc)   REPLY="1 2";; # 3 4 5";;
+        x265)     REPLY="ultrafast superfast veryfast faster";; # fast medium slow";;
+        kvazaar)  REPLY="ultrafast superfast veryfast faster";; # fast medium slow";;
+        kingsoft) REPLY="ultrafast superfast veryfast       ";; # fast medium slow";;
+        intel_sw) REPLY="                    veryfast faster";; # fast medium slow";;
+        intel_hw) REPLY="                    veryfast faster";; # fast medium slow";;
+        h265demo) REPLY="6 5";; # 4 3 2"
+        h264demo) REPLY="";; # no presets
+        *) echo "error: unknown codecId" && exit 1;;
+    esac
+    REPLY=$(echo $REPLY)
 }
 
-if [ 0 == 0 ]; then  # too slow preset removed
-	codec="ashevc";  PRESET="1 2 3 4 5" 																	encode "$@"
-	codec="x265";    PRESET="ultrafast superfast veryfast faster fast medium slow" 							encode "$@"
-	codec="kvazaar"  PRESET="ultrafast superfast veryfast faster fast medium slow" 							encode "$@"
-	codec="kingsoft" PRESET="ultrafast superfast veryfast        fast medium slow" 							encode "$@"
-	codec="intel_sw" PRESET="                    veryfast faster fast medium slow"         					encode "$@"
-	codec="intel_hw" PRESET="                    veryfast faster fast medium slow"         					encode "$@"
-	codec="h265demo" PRESET="6 5 4 3 2"                                                                		encode "$@"
-else                 # full range
-	codec="ashevc";  PRESET="1 2 3 4 5 6" 																	encode "$@"
-	codec="x265";    PRESET="ultrafast superfast veryfast faster fast medium slow slower veryslow placebo" 	encode "$@"
-	codec="kvazaar"  PRESET="ultrafast superfast veryfast faster fast medium slow slower veryslow placebo" 	encode "$@"
-	codec="kingsoft" PRESET="ultrafast superfast veryfast        fast medium slow        veryslow placebo" 	encode "$@"
-	codec="intel_sw" PRESET="                    veryfast faster fast medium slow slower veryslow"         	encode "$@"
-	codec="intel_hw" PRESET="                    veryfast faster fast medium slow slower veryslow"         	encode "$@"
-	codec="h265demo" PRESET="6 5 4 3 2 1"                                                                  	encode "$@"
-fi
+for codec in $CODECS; do
+    get_preset_list $codec; presets=$REPLY
+    echo "Benchmark '$codec' with --presets=[$presets]"
+    ./core/testbench.sh -i "$VECTORS" -c $codec -p "$PRMS" -o report.log ${presets:+ --preset "$presets"} "$@"
+    echo ""
+done
