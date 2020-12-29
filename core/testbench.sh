@@ -24,7 +24,7 @@ NCPU=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-readonly dirTmp=tmp/$timestamp
+readonly dirTmp=$(tempdir)/vctest/$timestamp
 
 usage()
 {
