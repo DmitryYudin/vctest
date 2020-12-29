@@ -16,8 +16,8 @@ CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h
 PRESETS=
 THREADS=1
 VECTORS="
-	akiyo_cif.yuv
-	foreman_cif.yuv
+	akiyo_352x288_30fps.yuv
+	foreman_352x288_30fps.yuv
 "
 DIR_OUT='out'
 NCPU=0
@@ -660,7 +660,7 @@ encode_single_file()
 			if [ \$error_code != 0 -o ! -f $dst ]; then
 				echo "" # newline if stderr==tty
 				cat $stdoutLog >&2
-				return 1
+				exit 1
 			fi
 			echo "\$fps" > $fpsLog
 		"
