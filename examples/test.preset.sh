@@ -7,7 +7,7 @@ PRMS="1500"
 VECTORS=""
 VECTORS="$VECTORS FourPeople_1280x720_30.y4m.yuv"
 VECTORS="$VECTORS stockholm_ter_1280x720_30.y4m.yuv"
-VECTORS=$(for i in $VECTORS; do echo "vectors/$i"; done)
+VECTORS=$(for i in $VECTORS; do echo "../vectors/$i"; done)
 
 get_preset_list()
 {
@@ -28,6 +28,6 @@ get_preset_list()
 for codec in $CODECS; do
     get_preset_list $codec; presets=$REPLY
     echo "Benchmark '$codec' with --presets=[$presets]"
-    ./core/testbench.sh -i "$VECTORS" -c $codec -p "$PRMS" -o report.log ${presets:+ --preset "$presets"} "$@"
+    ../core/testbench.sh -i "$VECTORS" -c $codec -p "$PRMS" -o report.log ${presets:+ --preset "$presets"} "$@"
     echo ""
 done
