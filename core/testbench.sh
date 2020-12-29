@@ -16,8 +16,8 @@ CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h
 PRESETS=
 THREADS=1
 VECTORS="
-	$dirScript/../vectors/akiyo_cif.yuv
-	$dirScript/../vectors/foreman_cif.yuv
+	akiyo_cif.yuv
+	foreman_cif.yuv
 "
 DIR_OUT='out'
 NCPU=0
@@ -34,7 +34,8 @@ usage()
 
 	Options:
 	    -h|--help        Print help.
-	    -i|--input   <x> Input YUV files. Multiple '-i vec' allowed.
+	    -i|--input   <x> Input YUV files relative to '/vectors' directory. Multiple '-i vec' allowed.
+	                     '/vectors' <=> '$(ospath $(normalized_dirname "$dirScript/../vectors"))'
 	    -d|--dir     <x> Output directory. Default: "$DIR_OUT".
 	    -o|--output  <x> Report path. Default: "$REPORT".
 	    -c|--codec   <x> Codecs list. Default: "$CODECS".
@@ -96,6 +97,10 @@ entrypoint()
 	[[ -n "$cmd_prms" ]] && PRMS=$cmd_prms
 	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
 	[[ -n "$cmd_ncpu" ]] && NCPU=$cmd_ncpu
+
+    # prepend with 'vectors/'
+    local dirVect=$(normalized_dirname "$dirScript/../vectors")
+    VECTORS=$(for i in $VECTORS; do echo "$dirVect"/$i; done)
 
 	target=${target:-windows}
 	PRESETS=${PRESETS:--}

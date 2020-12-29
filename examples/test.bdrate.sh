@@ -22,6 +22,5 @@ case 0 in
         "
     ;;
 esac
-VECTORS=$(for i in $VECTORS; do echo "../vectors/$i"; done)
 
 ../core/bdrate.sh -i "$VECTORS" -c "$CODECS" -p "$PRMS" -o "bdrate.log" -r "report" "$@"
