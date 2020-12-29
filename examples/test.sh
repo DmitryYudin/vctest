@@ -4,8 +4,12 @@ CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
 
 QP="22 27 32 37"
 case 0 in
-    0)  BR="  60   80   120   150"; VECTORS="akiyo_qcif.yuv foreman_qcif.yuv";;
-    1)  BR="1500  2000 3000  4000"; VECTORS="FourPeople_1280x720_30.y4m.yuv tears_of_steel_1280x720_24.webm.yuv";;
+    0)  BR="  60   80   120   150"
+        VECTORS="akiyo_176x144_30fps.yuv akiyo_352x288_30fps.yuv foreman_176x144_30fps.yuv foreman_352x288_30fps.yuv"
+    ;;
+    1)  BR="1500  2000 3000  4000";
+        VECTORS="FourPeople_1280x720_30fps.yuv stockholm_ter_1280x720_30fps.yuv"
+    ;;
 esac
 PRMS="${QP:-} ${BR:-}"
 

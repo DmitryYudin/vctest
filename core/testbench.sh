@@ -16,8 +16,8 @@ CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h
 PRESETS=
 THREADS=1
 VECTORS="
-	akiyo_cif.yuv
-	foreman_cif.yuv
+	akiyo_352x288_30fps.yuv
+	foreman_352x288_30fps.yuv
 "
 DIR_OUT='out'
 NCPU=0

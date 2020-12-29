@@ -5,8 +5,8 @@ CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
 PRMS="22 1500"
 
 VECTORS=""
-VECTORS="$VECTORS FourPeople_1280x720_30.y4m.yuv"
-VECTORS="$VECTORS stockholm_ter_1280x720_30.y4m.yuv"
+VECTORS="$VECTORS FourPeople_1280x720_30fps.yuv"
+VECTORS="$VECTORS stockholm_ter_1280x720_30fps.yuv"
 
 echo "Running one test at a time to get a correct performance estimate"
 THREADS="1 2 3"

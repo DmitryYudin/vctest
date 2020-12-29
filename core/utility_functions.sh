@@ -160,6 +160,58 @@ tempdir()
     esac
 }
 
+cygpath()
+{	
+	if command -v cygpath >/dev/null; then
+		command cygpath "$@"
+	else
+		case $OS in 
+			*_NT) echo "$2" | sed 's,\/,\\,g';; 
+			*) echo "$2"
+		esac
+	fi
+}
+
+realpath()
+{
+	if command -v realpath >/dev/null; then
+		command realpath "$1"
+	else # TODO
+		echo "$1"
+	fi
+}
+
+make_link() # dstDir srcPath dstName_optional
+{
+	local binDir=$1; shift
+	local src=$1 dst=; shift
+	[[ -n ${1:-} ]] && dst=$1 && shift
+	[[ -f $src ]] || error_exit "error($LINENO): target does not exist '$src'"
+	[[ -z $dst ]] && dst=$(basename "$src")
+	dst="$binDir/$dst"
+
+	mkdir -p "${dst%/*}"
+	rm -f "$dst" > /dev/null
+
+	src=$(realpath "$src")
+	dst=$(realpath "$dst")
+    if ! MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" command cmd /c "mklink "$(cygpath -w "$dst")" "$(cygpath -w "$src")"" >/dev/null; then
+		cat <<-'EOT'
+			Failed to create symlink. If you do not have enough permissions, fix it:
+			    - Run 'gpedit.msc'
+			    - Navigate to 'Computer configuration'
+			                    'Windows Settings'
+			                      'Security Settings'
+			                        'Local Policies'
+			                          'User Rights Assignment'
+			                            'Create symbolic links'
+			    - Here you can set which users can create symbolic links.
+			To changes take effect, the account logout/login may require.
+		EOT
+		return 1
+	fi
+}
+
 detect_resolution_string()
 {	
 	local filename=$1; shift
@@ -278,4 +330,16 @@ detect_frame_num()
 	[[ $numBytes != $numBytes2 ]] && error_exit "can't detect frames number $filename"
 
 	REPLY=$numFrames
+}
+
+human_readable_bytes()
+{
+    local len=$1; shift
+	local suff=B num=1
+	[[ $len -ge       1000 ]] && suff="K" &&        num=1000
+	[[ $len -ge    1000000 ]] && suff="M" &&     num=1000000
+	[[ $len -ge 1000000000 ]] && suff="G" &&  num=1000000000
+	local sz=$(( len / num)).$(( (10*len / num) % 10)) # 0.0X - 999.9Y
+	[[ $len == 0 ]] && sz="?.?"
+	REPLY="$sz$suff"
 }
