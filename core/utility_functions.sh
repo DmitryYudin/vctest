@@ -117,6 +117,15 @@ normalized_dirname() # TODO: alternatives if realpath does not exist
     # readlink -m "$dirname"
 }
 
+tempdir()
+{
+    case ${OS:-} in 
+        *_NT) [[ -n "$TEMP" ]] && echo "$TEMP" || echo "$TMP";;
+        *) echo ${TMPDIR:-/tmp};;
+        #*) mkdir -p ${TMPDIR:-/tmp}/vctest && TMPDIR=${TMPDIR:-/tmp}/vctest mktemp -d;;
+    esac
+}
+
 detect_resolution_string()
 {	
 	local filename=$1; shift
