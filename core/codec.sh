@@ -22,6 +22,7 @@ windows_h265demo="$dirBinWindows/hw265/h265EncDemo.exe"
 windows_h265demo_v2="$dirBinWindows/hw265_v2/hw265app.exe"
 windows_h265demo_v3="$dirBinWindows/hw265_v3/hw265app.exe"
 windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
+windows_h264aspt="$dirBinWindows/h264_aspt/h264enc.exe"
 
 dirBinAndroid="$dirScript/../bin/android"
 android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
@@ -29,6 +30,7 @@ android_ks="$dirBinAndroid/ks/ks_encoder"
 android_h265demo="$dirBinAndroid/hw265/h265demo"
 android_h265demo_v3="$dirBinAndroid/hw265_v3/hw265app"
 android_x265="$dirBinAndroid/x265/x265"
+android_h264aspt="$dirBinAndroid/h264_aspt/h264enc"
 
 dirBinLinuxARM="$dirScript/../bin/linux-arm"
 linux_arm_h265demo="$dirBinLinuxARM/hw265/h265demo"
@@ -36,6 +38,7 @@ linux_arm_h265demo_v2="$dirBinLinuxARM/hw265_v2/hw265app"
 linux_arm_h265demo_v3="$dirBinLinuxARM/hw265_v3/hw265app"
 linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
 linux_arm_x265="$dirBinLinuxARM/x265/x265"
+linux_arm_h264aspt="$dirBinLinuxARM/h264_aspt/h264enc"
 
 codec_get_knownId()
 {
@@ -45,6 +48,7 @@ codec_get_knownId()
     REPLY="$REPLY intel_sw intel_hw"
     REPLY="$REPLY h265demo h265demo_v2 h265demo_v3"
     REPLY="$REPLY h264demo"
+    REPLY="$REPLY h264aspt"
     REPLY=${REPLY# }
 }
 
@@ -64,6 +68,7 @@ codec_default_preset()
 		h265demo_v2)preset=6;; # 2,3,5,6
 		h265demo_v3)preset=6;;
 		h264demo)	preset=-;;
+        h264aspt)	preset=3;; # 0 - 10
 		*) error_exit "unknown encoder: $codecId";;
 	esac
 
@@ -634,4 +639,40 @@ cmd_h264demo()
 
 	REPLY="--test $args"   # produce output, but have slow speed
 #	REPLY="--speed $args"  # no output, but demonstrate high speed
+}
+
+exe_h264aspt() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_h264aspt;
+				 [[ $1 == adb     ]] && REPLY=$android_h264aspt;
+				 [[ $1 == ssh     ]] && REPLY=$linux_arm_h264aspt;
+				 return 0;
+}
+src_h264aspt() { REPLY="-i $1"; }
+dst_h264aspt() { REPLY="-o $1"; }
+cmd_h264aspt()
+{
+	local args= threads=1 res=
+	while [ "$#" -gt 0 ]; do
+		case $1 in
+			-i|--input) 	args="$args -i $2";;
+			-o|--output) 	args="$args -o $2";;
+			   --res) 		res=$2;;
+			   --fps) 		args="$args --fps $2";;
+			   --preset) 	args="$args --quality $2";; # 0 (slow) - 10 (fast)
+			   --qp)     	args="$args --bitrate 10000 --qpmin $2 --qpmax $2";; # any valid bitrate
+			   --bitrate)   args="$args --bitrate $2";;
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+	local width=${res%%x*}
+	local height=${res##*x}
+	args="$args -w $width"
+	args="$args -h $height"
+
+#	args="$args -threads $threads"
+	args="$args --keyint 0"         	# Only first picture is intra.
+
+	REPLY=$args
 }

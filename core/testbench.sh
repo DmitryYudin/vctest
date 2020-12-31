@@ -12,7 +12,8 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 PRMS="28 34 39 44"
 REPORT=report.log
 REPORT_KW=
-CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo"
+CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo "\
+"h264aspt"
 PRESETS=
 THREADS=1
 VECTORS="
@@ -52,6 +53,7 @@ usage()
 	                       h265demo: 6 *5 4 3 2 1
 	                       h265demo_v2: 6 *5   3 2
 	                       h264demo: N/A
+	                       h264aspt: 0 (slow) - 10 (fast)
 	    -j|--ncpu    <x> Number of encoders to run in parallel. The value of '0' will run as many encoders as many
 	                     CPUs available. Default: $NCPU
 	                     Note, execution time based profiling data (CPU consumption and FPS estimation) is not
@@ -908,7 +910,9 @@ parse_stdoutLog()
 		;;
 		h264demo)
 			fps=$(grep -i 'Tests completed' "$log" | tr -s ' ' | cut -d' ' -f 1)
-			snr=$(grep -i 'Tests completed' "$log" | tr -s ' ' | cut -d' ' -f 5)
+		;;
+		h264aspt)
+			fps=$(grep -i 'fps$' "$log" | tr -s ' ' | cut -d' ' -f 3)
 		;;
 		*) error_exit "unknown encoder: $codecId";;
 	esac
