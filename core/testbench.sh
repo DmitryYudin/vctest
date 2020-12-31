@@ -11,7 +11,7 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 
 PRMS="28 34 39 44"
 REPORT=report.log
-REPORT_KW=${REPORT%.*}.kw
+REPORT_KW=
 CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo"
 PRESETS=
 THREADS=1
@@ -19,7 +19,7 @@ VECTORS="
 	akiyo_352x288_30fps.yuv
 	foreman_352x288_30fps.yuv
 "
-DIR_OUT='out'
+DIR_OUT="$dirScript"/../out
 NCPU=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
@@ -36,7 +36,6 @@ usage()
 	    -h|--help        Print help.
 	    -i|--input   <x> Input YUV files relative to '/vectors' directory. Multiple '-i vec' allowed.
 	                     '/vectors' <=> '$(ospath $(normalized_dirname "$dirScript/../vectors"))'
-	    -d|--dir     <x> Output directory. Default: "$DIR_OUT".
 	    -o|--output  <x> Report path. Default: "$REPORT".
 	    -c|--codec   <x> Codecs list. Default: "$CODECS".
 	    -t|--threads <x> Number of threads to use
@@ -66,7 +65,7 @@ usage()
 
 entrypoint()
 {
-	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut= cmd_ncpu= cmd_endofflags=
+	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_ncpu= cmd_endofflags=
 	local hide_banner= target= force=
 	local remote=false targetInfo=
 	while [[ "$#" -gt 0 ]]; do
@@ -74,7 +73,6 @@ entrypoint()
 		case $1 in
 			-h|--help)		usage && return;;
 			-i|--in*) 		cmd_vec="$cmd_vec $2";;
-			-d|--dir)		cmd_dirOut=$2;;
 			-o|--out*) 		cmd_report=$2;;
 			-c|--codec*) 	cmd_codecs=$2;;
 			-t|--thread*)   cmd_threads=$2;;
@@ -91,14 +89,16 @@ entrypoint()
 		shift $nargs
 		[[ -n "$cmd_endofflags" ]] && break
 	done
-	[[ -n "$cmd_dirOut" ]] && DIR_OUT=$cmd_dirOut
-	[[ -n "$cmd_report" ]] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}.kw
+	[[ -n "$cmd_report" ]] && REPORT=${cmd_report//\\//}
 	[[ -n "$cmd_vec" ]] && VECTORS=${cmd_vec# }
 	[[ -n "$cmd_codecs" ]] && CODECS=$cmd_codecs
 	[[ -n "$cmd_threads" ]] && THREADS=$cmd_threads
 	[[ -n "$cmd_prms" ]] && PRMS=$cmd_prms
 	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
 	[[ -n "$cmd_ncpu" ]] && NCPU=$cmd_ncpu
+
+    # Currently only used by bd-rate script
+    REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
 
     # prepend with 'vectors/'
     local dirVect=$(normalized_dirname "$dirScript/../vectors")
