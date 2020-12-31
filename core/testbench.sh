@@ -60,13 +60,16 @@ usage()
 	       --hide        Do not print legend and header.
 	       --adb         Run Android@ARM using ADB. | Credentials are read from 'remote.local' file.
 	       --ssh         Run Linux@ARM using SSH.   |         (see example for details)
+	       --force       Invalidate results cache
+	       --decode      Force decode stage
+	       --parse       Force parse stage
 	EOF
 }
 
 entrypoint()
 {
 	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut= cmd_ncpu= cmd_endofflags=
-	local hide_banner= target=
+	local hide_banner= target= force= parse= decode=
 	local remote=false targetInfo=
 	while [[ "$#" -gt 0 ]]; do
 		local nargs=2
@@ -83,6 +86,9 @@ entrypoint()
 			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; remote=true; nargs=1;;
 			   --ssh)       target=ssh; remote=true; nargs=1;;
+               --force)     force=1; nargs=1;;
+               --decode)    decode=1; nargs=1;;
+               --parse)     parse=1; nargs=1;;
 			   --)			cmd_endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
@@ -146,7 +152,7 @@ entrypoint()
 		local outputDir="$DIR_OUT/$outputDirRel"
 
 		local encode=false
-		if [[ ! -f "$outputDir/encoded.ts" ]]; then
+		if [[ -n "$force" || ! -f "$outputDir/encoded.ts" ]]; then
 			encode=true
 		elif [[ $NCPU -eq 1 && ! -f "$outputDir/cpu.log" ]]; then
 			# cpu load monitoring is currently disabled for a remote run
@@ -162,9 +168,11 @@ entrypoint()
 
 			encodeList="$encodeList $outputDirRel"
 		fi
+		[[ -n $decode ]] && rm -f $outputDir/decoded.ts $outputDir/parsed.ts
 		if [[ ! -f "$outputDir/decoded.ts" ]]; then
 			decodeList="$decodeList $outputDirRel"
 		fi
+        [[ -n $parse ]] && rm -f $outputDir/parsed.ts
 		if [[ ! -f "$outputDir/parsed.ts" ]]; then
 			parseList="$parseList $outputDirRel"
 		fi
