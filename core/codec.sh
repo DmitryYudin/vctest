@@ -23,6 +23,9 @@ windows_h265demo_v2="$dirBinWindows/hw265_v2/hw265app.exe"
 windows_h265demo_v3="$dirBinWindows/hw265_v3/hw265app.exe"
 windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
 windows_h264aspt="$dirBinWindows/h264_aspt/h264enc.exe"
+windows_vpx=$dirBinWindows/vpx/vpxenc.exe
+windows_vp8=$windows_vpx
+windows_vp9=$windows_vpx
 
 dirBinAndroid="$dirScript/../bin/android"
 android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
@@ -31,6 +34,9 @@ android_h265demo="$dirBinAndroid/hw265/h265demo"
 android_h265demo_v3="$dirBinAndroid/hw265_v3/hw265app"
 android_x265="$dirBinAndroid/x265/x265"
 android_h264aspt="$dirBinAndroid/h264_aspt/h264enc"
+android_vpx=$dirBinAndroid/vpx/vpxenc
+android_vp8=$android_vpx
+android_vp9=$android_vpx
 
 dirBinLinuxARM="$dirScript/../bin/linux-arm"
 linux_arm_h265demo="$dirBinLinuxARM/hw265/h265demo"
@@ -39,6 +45,9 @@ linux_arm_h265demo_v3="$dirBinLinuxARM/hw265_v3/hw265app"
 linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
 linux_arm_x265="$dirBinLinuxARM/x265/x265"
 linux_arm_h264aspt="$dirBinLinuxARM/h264_aspt/h264enc"
+linux_arm_vpx=$dirBinLinuxARM/vpx/vpxenc
+linux_arm_vp8=$linux_arm_vpx
+linux_arm_vp9=$linux_arm_vpx
 
 codec_get_knownId()
 {
@@ -49,6 +58,7 @@ codec_get_knownId()
     REPLY="$REPLY h265demo h265demo_v2 h265demo_v3"
     REPLY="$REPLY h264demo"
     REPLY="$REPLY h264aspt"
+    REPLY="$REPLY vp8 vp9"
     REPLY=${REPLY# }
 }
 
@@ -69,6 +79,8 @@ codec_default_preset()
 		h265demo_v3)preset=6;;
 		h264demo)	preset=-;;
         h264aspt)	preset=3;; # 0 - 10
+        vp8)	    preset=5;; # 0 - 16
+        vp9)	    preset=9;; # 0 -  9
 		*) error_exit "unknown encoder: $codecId";;
 	esac
 
@@ -675,4 +687,69 @@ cmd_h264aspt()
 	args="$args --keyint 0"         	# Only first picture is intra.
 
 	REPLY=$args
+}
+
+exe_VPX() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_vpx;
+				 [[ $1 == adb     ]] && REPLY=$android_vpx;
+				 [[ $1 == ssh     ]] && REPLY=$linux_arm_vpx;
+				 return 0;
+}
+src_vpx() { REPLY="$1"; }
+dst_vpx() { REPLY="-o $1"; }
+cmd_vpx() # https://arxiv.org/pdf/2009.14165.pdf   [ we do not use --rt mode ]
+{
+	local args= threads=1 res=
+	while [ "$#" -gt 0 ]; do
+		case $1 in
+			-i|--input) 	args="$args $2";;
+			-o|--output) 	args="$args -o $2";;
+			   --res) 		res=$2;;
+			   --fps) 		args="$args --fps=$2/1";;
+			   --preset) 	args="$args --cpu-used=$2";;
+			   --qp)     	args="$args --target-bitrate=0  --end-usage=cq --cq-level=$2";; # any valid bitrate
+			   --bitrate)   args="$args --target-bitrate=$2 --end-usage=cbr";; # --max-intra-rate=$((3 * $2))";;
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+	local width=${res%%x*}
+	local height=${res##*x}
+	args="$args --width=$width --height=$height --threads=$threads"
+    args="$args --i420 --ivf"
+    args="$args --min-q=2 --max-q=56"
+    args="$args --lag-in-frames=0 --drop-frame=0 --resize-allowed=0 --error-resilient=0"
+    args="$args --undershoot-pct=100 --overshoot-pct=100"
+    args="$args --buf-sz=1000 --buf-initial-sz=500 --buf-optimal-sz=600"
+    args="$args --verbose"  # show settings
+    args="$args --max-intra-rate=300 --disable-kf --kf-min-dist=90000 --kf-max-dist=90000"
+    args="$args --passes=1" # vp9 uses two-pass by default
+
+	REPLY=$args
+}
+
+exe_vp8() { exe_VPX "$@"; }
+src_vp8() { src_vpx "$@"; }
+dst_vp8() { dst_vpx "$@"; }
+cmd_vp8() # https://www.webmproject.org/docs/encoder-parameters
+{
+    local args=;  # speed [0-16]: 0 - slowest; [4,5] - disable rdo
+    cmd_vpx "$@"; args="$args $REPLY"
+
+	args="$args --codec=vp8"
+    REPLY=$args
+}
+
+exe_vp9() { exe_VPX "$@"; }
+src_vp9() { src_vpx "$@"; }
+dst_vp9() { dst_vpx "$@"; }
+cmd_vp9()
+{
+    local args=; # speed [0-9]: 0 - slowest; [0,4] - VOD; [5-9] - Realtime
+    cmd_vpx "$@"; args="$args $REPLY"
+
+	args="$args --codec=vp9"
+	args="$args --tile-columns=0"
+    REPLY=$args
 }
