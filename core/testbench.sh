@@ -13,7 +13,7 @@ PRMS="28 34 39 44"
 REPORT=report.log
 REPORT_KW=
 CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo "\
-"h264aspt"
+"h264aspt vp8 vp9"
 PRESETS=
 THREADS=1
 VECTORS="
@@ -54,6 +54,8 @@ usage()
 	                       h265demo_v2: 6 *5   3 2
 	                       h264demo: N/A
 	                       h264aspt: 0 (slow) - 10 (fast)
+	                       vp8: 0 (slow) - 16 (fast)
+	                       vp9: 0 (slow) -  9 (fast)
 	    -j|--ncpu    <x> Number of encoders to run in parallel. The value of '0' will run as many encoders as many
 	                     CPUs available. Default: $NCPU
 	                     Note, execution time based profiling data (CPU consumption and FPS estimation) is not
@@ -916,6 +918,10 @@ parse_stdoutLog()
 		h264aspt)
 			fps=$(grep -i 'fps$' "$log" | tr -s ' ' | cut -d' ' -f 3)
 		;;
+		vp8|vp9) # be carefull with multipass
+            fps=$(cat "$log" | tr "\r" "\n" | grep -E '\([0-9]{1,}\.[0-9]{1,} fps\)' | tail -n 1 | tr -d '()' | tr -s ' ' | cut -d' ' -f 10)
+		;;
+
 		*) error_exit "unknown encoder: $codecId";;
 	esac
 
