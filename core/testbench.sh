@@ -127,12 +127,14 @@ entrypoint()
 
 	local startSec=$SECONDS
 
+    mkdir -p "$dirTmp"
+
 	#
 	# Scheduling
 	#
 	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS" "$PRESETS"
 
-	local optionsFile=options.txt
+	local optionsFile="$dirTmp"/options.txt
 	prepare_optionsFile $target "$optionsFile"
 
 	local encodeList= decodeList= parseList= reportList=
@@ -171,13 +173,12 @@ entrypoint()
 		progress_next "$outputDirRel"
 
 	done < $optionsFile
-	rm -f $optionsFile
+	rm -f "$optionsFile"
 	progress_end
 
 	local self
 	relative_path "$0"; self=$REPLY # just to make output look nicely
 
-    mkdir -p $dirTmp
 	local testplan=$dirTmp/testplan.txt
 
 	#
@@ -254,7 +255,7 @@ vectors_verify()
 		if [[ -f "$vec" ]]; then
 			vecList="$vecList $vec"
 		else
-			echo "warning: can't find vector. Remove '$vec' from a list."
+			echo "warning: can't find vector. Remove '$vec' from a list." >&2
 		fi
 	done
 	VECTORS=${vecList# }
@@ -267,7 +268,7 @@ vectors_verify()
 	if $remote; then
 		local remoteDirVec
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
-		echo "Push vectors to remote machine $remoteDirVec ..."
+		print_console "Push vectors to remote machine $remoteDirVec ...\n"
 		TARGET_exec "mkdir -p $remoteDirVec"
 		for vec in $VECTORS_ABS; do
             print_console "$vec\r"

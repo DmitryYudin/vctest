@@ -110,8 +110,8 @@ codec_cmdArgs()
 {
 	local codecId=$1; shift
 	cmd_${codecId} "$@"
-	REPLY=${REPLY# }
-	REPLY=${REPLY% }
+    set -- $REPLY # remove extra spaces
+	REPLY=$*
 }
 codec_cmdHash()
 {
@@ -141,6 +141,10 @@ codec_verify()
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
+    local self=$(ospath "$dirScript/${BASH_SOURCE##*/}")
+
+    # Avoid temporary files to appear in a root folder
+    pushd "$dirOut" >/dev/null
 
 	for codecId in $CODECS; do
 		exe_${codecId} $target; encoderExe=$REPLY
@@ -158,21 +162,21 @@ codec_verify()
 			local cmd=$encoderExe
 			# temporary hack, for backward compatibility (remove later)
 			if [[ $codecId == h265demo ]]; then
-				echo "" > $dirOut/h265demo.cfg
-				cmd="$cmd -c $(ospath "$dirOut/h265demo.cfg")"
+				echo "" > h265demo.cfg
+				cmd="$cmd -c h265demo.cfg"
 			fi
 			codec_cmdArgs $codecId --res 160x96 --fps 30; cmd="$cmd $REPLY"
-			codec_cmdSrc $codecId "$0"; cmd="$cmd $REPLY"
-			codec_cmdDst $codecId "$dirOut/out.tmp"; cmd="$cmd $REPLY"
+			codec_cmdSrc $codecId "$self"; cmd="$cmd $REPLY"
+			codec_cmdDst $codecId out.tmp; cmd="$cmd $REPLY"
 
 			if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
 				echo "warning: encoding error. Remove '$codecId' from a list." >&2;
             else
     			codecList="$codecList $codecId"
 			fi
-			rm -f "$dirOut/out.tmp"
 		fi
 	done
+    popd >/dev/null
 	CODECS=${codecList# }
 
 	rm -rf -- "$dirOut"
@@ -183,7 +187,7 @@ codec_verify()
 		local remoteDirBin
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
 		TARGET_exec "mkdir -p $remoteDirBin"
-		echo "Push codecs to remote machine $remoteDirBin ..."
+		print_console "Push codecs to remote machine $remoteDirBin ...\n"
 		for codecId in $CODECS; do
 			exe_${codecId} $target; encoderExe=$REPLY
 			encoderExe=$(ospath $encoderExe)
