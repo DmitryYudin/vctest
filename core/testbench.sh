@@ -36,7 +36,7 @@ usage()
 	Options:
 	    -h|--help        Print help.
 	    -i|--input   <x> Input YUV files relative to '/vectors' directory. Multiple '-i vec' allowed.
-	                     '/vectors' <=> '$(ospath $(normalized_dirname "$dirScript/../vectors"))'
+	                     '/vectors' <=> '$(ospath "$dirScript/../vectors")'
 	    -o|--output  <x> Report path. Default: "$REPORT".
 	    -c|--codec   <x> Codecs list. Default: "$CODECS".
 	    -t|--threads <x> Number of threads to use
@@ -109,7 +109,7 @@ entrypoint()
     REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
 
     # prepend with 'vectors/'
-    local dirVect=$(normalized_dirname "$dirScript/../vectors")
+    local dirVect=$(ospath "$dirScript/../vectors")
     VECTORS=$(for i in $VECTORS; do echo "$dirVect"/$i; done)
 
 	target=${target:-windows}
@@ -274,7 +274,7 @@ vectors_verify()
 
 	local VECTORS_ABS=
 	for vec in $VECTORS; do
-		VECTORS_ABS="$VECTORS_ABS $(realpath "$vec")"
+		VECTORS_ABS="$VECTORS_ABS $(ospath "$vec")"
 	done
 
 	if $remote; then

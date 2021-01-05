@@ -8,39 +8,62 @@ error_exit()
 	exit 1
 }
 
-# Always use '/' as separator
-#
-# Change nothing for non-Windows host. On Windows, replace Cygwin '/cygdrive/c'
-# or Msys/Busybox '/c' prefix with the drive letter 'c:' to enable native apps
-# to recognize the path name.
+# Normalized path name with '/' separator
+# Always starts with driver letter on Windows: 'C:/...'
 # Note, WSL buildins do not accept Windows path name in a form of 'C:/abcd'.
+#
+# Input argument is considered as a file name if it does not exist.
+#
 ospath() # ~= cygpath -m
 {
 	local path=$1; shift
+
+    if [[ -z "${GLOBAL_BUSYBOX:-}" ]]; then
+        { cat --help 2>&1 | head -1 | grep BusyBox && GLOBAL_BUSYBOX=1 || GLOBAL_BUSYBOX=0; } >/dev/null 2>&1
+    fi
+
+	[[ "$GLOBAL_BUSYBOX" == 1 ]] && realpath "$path" && return
 	[[ -n "${WSL_DISTRO_NAME:-}" ]] && command wslpath -m "$path" && return
-	case ${OS:-} in 
-		*_NT) : ;;
-		*) echo "$path" && return;;
-	esac
-	# msys, cygwin, busybox
-	path=${path#/cygdrive} # cut prefix
-	case $path in 
-		/[a-zA-Z]/*) echo "${path:1:1}:${path:2}";;
-		*) echo "$path";;
-	esac
-}
-unixpath() # ~= cygpath -m
-{
-	command cygpath -m "$@"
+
+    path=${path//\\//}
+
+    local dirname=$path filename=
+    [[ ! -d "$path" ]] && dirname=${path%/*} && filename=${path##*/}
+
+    [[ ! -e "$dirname" ]] && error_exit ""$dirname" does not exist"
+
+    local want_windows_path_name=
+	case ${OS:-} in *_NT) want_windows_path_name='-W'; esac
+
+    path=$(cd "$dirname" >/dev/null 2>&1 && pwd ${want_windows_path_name})
+    [[ -n "$filename" ]] && path=$path/$filename
+
+    path=${path//\\//}
+
+    echo "$path"
 }
 
 relative_path()
 {
-	local file=$1
-	local cwd=$(pwd -P)
-	local path="$(cd "$(dirname "$file")"; pwd -P)/${file##*[/\\]}"
-	case $path in $cwd/*) path=./${path#$cwd/}; esac
-	REPLY=$path
+    local src=$1 cwd=${2:-.}
+	src=$(ospath "$src")
+	cwd=$(ospath "$cwd")
+
+    # different mount point
+    [[ "${src%%/*}" != "${cwd%%/*}" ]] && REPLY=$src && return
+    # cut common path
+    while :; do
+        local p0=${src%%/*} p1=${cwd%%/*}
+        [[ "${p0%%/*}" != "${p1%%/*}" ]] && break
+        src=${src#"$p0"}; src=${src#/}
+        cwd=${cwd#"$p1"}; cwd=${cwd#/}
+    done
+    # level up
+    local IFS=/ up
+    for up in $cwd; do
+        src="../$src"
+    done
+	REPLY=$src
 }
 
 dict_checkKey()
@@ -145,15 +168,6 @@ print_console()
 UT
 }
 
-# This also works for files, but we need dirs only
-normalized_dirname() # TODO: alternatives if realpath does not exist
-{
-    local dirname=$1; shift
-    # cd "$dirname" >/dev/null 2>&1 && pwd
-    realpath $dirname 2>/dev/null
-    # readlink -m "$dirname"
-}
-
 tempdir()
 {
     case ${OS:-} in 
@@ -161,27 +175,6 @@ tempdir()
         *) echo ${TMPDIR:-/tmp};;
         #*) mkdir -p ${TMPDIR:-/tmp}/vctest && TMPDIR=${TMPDIR:-/tmp}/vctest mktemp -d;;
     esac
-}
-
-cygpath()
-{	
-	if command -v cygpath >/dev/null; then
-		command cygpath "$@"
-	else
-		case $OS in 
-			*_NT) echo "$2" | sed 's,\/,\\,g';; 
-			*) echo "$2"
-		esac
-	fi
-}
-
-realpath()
-{
-	if command -v realpath >/dev/null; then
-		command realpath "$1"
-	else # TODO
-		echo "$1"
-	fi
 }
 
 make_link() # dstDir srcPath dstName_optional
@@ -196,23 +189,30 @@ make_link() # dstDir srcPath dstName_optional
 	mkdir -p "${dst%/*}"
 	rm -f "$dst" > /dev/null
 
-	src=$(realpath "$src")
-	dst=$(realpath "$dst")
-    if ! MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" command cmd /c "mklink "$(cygpath -w "$dst")" "$(cygpath -w "$src")"" >/dev/null; then
-		cat <<-'EOT'
-			Failed to create symlink. If you do not have enough permissions, fix it:
-			    - Run 'gpedit.msc'
-			    - Navigate to 'Computer configuration'
-			                    'Windows Settings'
-			                      'Security Settings'
-			                        'Local Policies'
-			                          'User Rights Assignment'
-			                            'Create symbolic links'
-			    - Here you can set which users can create symbolic links.
-			To changes take effect, the account logout/login may require.
-		EOT
-		return 1
-	fi
+    case ${OS:-} in 
+        *_NT) 
+        	src=$(ospath "$src"); src=${src////\\}
+        	dst=$(ospath "$dst"); dst=${dst////\\}
+            if ! MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" command cmd /c "mklink "$dst" "$src"" >/dev/null; then
+cat <<-'EOT'
+Failed to create symlink. If you do not have enough permissions, fix it:
+    - Run 'gpedit.msc'
+    - Navigate to 'Computer configuration'
+                    'Windows Settings'
+                      'Security Settings'
+                        'Local Policies'
+                          'User Rights Assignment'
+                            'Create symbolic links'
+    - Here you can set which users can create symbolic links.
+To changes take effect, the account logout/login may require.
+EOT
+				return 1
+	        fi
+        ;;
+        *)
+            ln -s "$src" "$dst"
+        ;;
+    esac
 }
 
 detect_resolution_string()
@@ -295,23 +295,26 @@ detect_framerate_string()
 {	
 	local filename=$1; shift
 	local name=${filename//\\/}; name=${name##*[/\\]}; name=${name%%.*}
-	local framerate=
 
 	name=${name//FPS/fps}
-
-	# try XXX pattern delimited by "." or "_"
+    REPLY=
+	# Try XXX pattern delimited by "." or "_"
+    # 1. consider numbers in a range [1;999] with 'fps' suffix
+	for delim in _ .; do
+		local IFS=$delim
+		for i in $name; do # avoid regexp to make code busybox friendly
+            case $i in [1-9]fps|[1-9][0-9]fps|[1-9][0-9][0-9]fps) REPLY=${i%fps} && return; esac
+		done
+	done
+    # 2. consider numbers in a range [1;99]
 	for delim in _ .; do
 		local IFS=$delim
 		for i in $name; do
-			if [[ "$i" =~ ^[1-9][0-9]{0,2}(fps)?$ ]]; then
-				framerate=${i%fps} && break
-			fi
+            case $i in [1-9]|[1-9][0-9]) REPLY=$i && return; esac
 		done
-		[[ -n "$framerate" ]] && break
 	done
-	[[ -z "$framerate" ]] && framerate=30
-
-	REPLY=$framerate
+    # 3. set to default
+    REPLY=30
 }
 
 detect_frame_num()

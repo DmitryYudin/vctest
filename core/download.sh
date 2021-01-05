@@ -20,8 +20,8 @@ notify() {
 	EOT
 }
 
-readonly DIR_BIN=$(normalized_dirname "$dirScript/../bin")
-DIR_VEC=$(normalized_dirname "$dirScript/../vectors")
+readonly DIR_BIN=$(ospath "$dirScript/../bin")
+DIR_VEC=$(ospath "$dirScript/../vectors")
 INPUT=
 readonly DIR_CACHE=$DIR_VEC/cache
 readonly SevenZipExe=$DIR_BIN/7z
@@ -97,7 +97,7 @@ entrypoint()
     done
 	[[ -z "$INPUT" ]] && error_exit "input file not set"
 
-    DIR_VEC=$(normalized_dirname "$DIR_VEC")
+    DIR_VEC=$(ospath "$DIR_VEC")
     [[ -n $do_map || -n $do_stat ]] && { map_vectors "$do_map" "$do_stat"; return; }
     [[ -n $USE_POWERSHELL ]] && DONWLOAD_BACKEND=ps || DONWLOAD_BACKEND=curl
 
@@ -596,7 +596,7 @@ map_vectors()
     resolutions=$(for i in "${!map[@]}"; do echo "$i"; done | sort -n | { while read -r; do printf "$REPLY "; done; } )
 
     # prefix with subdir
-    local dirVec=$(normalized_dirname "$dirScript/../vectors")
+    local dirVec=$(ospath "$dirScript/../vectors")
     local pref=${DIR_VEC#$dirVec};
     pref=${pref#/}
     [[ -n "$pref" ]] && pref=$pref/
