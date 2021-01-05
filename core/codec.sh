@@ -96,7 +96,7 @@ codec_exe()
 	else
 		exe_${codecId} $target; encoderExe=$REPLY
 		[[ -f "$encoderExe" ]] || error_exit "encoder does not exist '$encoderExe'"
-		encoderExe=$(realpath "$encoderExe")
+		encoderExe=$(ospath "$encoderExe")
 		eval "CACHE_path_${codecId}_${target}=$encoderExe"
 	fi
 
@@ -140,7 +140,7 @@ codec_cmdSrc()
 {
 	local codecId=$1; shift
 	local src=$1; shift
-	src_${codecId} "$(ospath $src)"
+	src_${codecId} "$src"
 }
 codec_cmdDst()
 {
@@ -204,8 +204,7 @@ codec_verify()
 		TARGET_exec "mkdir -p $remoteDirBin"
 		print_console "Push codecs to remote machine $remoteDirBin ...\n"
 		for codecId in $CODECS; do
-			exe_${codecId} $target; encoderExe=$REPLY
-			encoderExe=$(ospath $encoderExe)
+            codec_exe $codecId $target; encoderExe=$REPLY
 			TARGET_push "$(dirname $encoderExe)/." $remoteDirBin
 			TARGET_exec "chmod +x $remoteDirBin/$(basename $encoderExe)"
 	    done
