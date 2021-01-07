@@ -12,40 +12,41 @@
 #	codec_cmdDst(id, src)     - set output file name
 #
 
-dirBinWindows="$dirScript/../bin/windows"
-windows_ashevc="$dirBinWindows/ashevc/cli_ashevc.exe"
-windows_x265="$dirBinWindows/x265/x265.exe"
-windows_kvazaar="$dirBinWindows/kvazaar/kvazaar.exe"
-windows_kingsoft="$dirBinWindows/kingsoft/AppEncoder_x64.exe"
-windows_intel="$dirBinWindows/intel/sample_encode.exe"
-windows_h265demo="$dirBinWindows/hw265/h265EncDemo.exe"
-windows_h265demo_v2="$dirBinWindows/hw265_v2/hw265app.exe"
-windows_h265demo_v3="$dirBinWindows/hw265_v3/hw265app.exe"
-windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
-windows_h264aspt="$dirBinWindows/h264_aspt/h264enc.exe"
-windows_vpx=$dirBinWindows/vpx/vpxenc.exe
+dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
+
+DIR_BIN=$(ospath "$dirScript"/../bin)
+
+windows_ashevc=windows/ashevc/cli_ashevc.exe
+windows_x265=windows/x265/x265.exe
+windows_kvazaar=windows/kvazaar/kvazaar.exe
+windows_kingsoft=windows/kingsoft/AppEncoder_x64.exe
+windows_intel=windows/intel/sample_encode.exe
+windows_h265demo=windows/hw265/h265EncDemo.exe
+windows_h265demo_v2=windows/hw265_v2/hw265app.exe
+windows_h265demo_v3=windows/hw265_v3/hw265app.exe
+windows_h264demo=windows/hme264/HW264_Encoder_Demo.exe
+windows_h264aspt=windows/h264_aspt/h264enc.exe
+windows_vpx=windows/vpx/vpxenc.exe
 windows_vp8=$windows_vpx
 windows_vp9=$windows_vpx
 
-dirBinAndroid="$dirScript/../bin/android"
-android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
-android_ks="$dirBinAndroid/ks/ks_encoder"
-android_h265demo="$dirBinAndroid/hw265/h265demo"
-android_h265demo_v3="$dirBinAndroid/hw265_v3/hw265app"
-android_x265="$dirBinAndroid/x265/x265"
-android_h264aspt="$dirBinAndroid/h264_aspt/h264enc"
-android_vpx=$dirBinAndroid/vpx/vpxenc
+android_kingsoft=android/kingsoft/appencoder
+android_ks=android/ks/ks_encoder
+android_h265demo=android/hw265/h265demo
+android_h265demo_v3=android/hw265_v3/hw265app
+android_x265=android/x265/x265
+android_h264aspt=android/h264_aspt/h264enc
+android_vpx=android/vpx/vpxenc
 android_vp8=$android_vpx
 android_vp9=$android_vpx
 
-dirBinLinuxARM="$dirScript/../bin/linux-arm"
-linux_arm_h265demo="$dirBinLinuxARM/hw265/h265demo"
-linux_arm_h265demo_v2="$dirBinLinuxARM/hw265_v2/hw265app"
-linux_arm_h265demo_v3="$dirBinLinuxARM/hw265_v3/hw265app"
-linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
-linux_arm_x265="$dirBinLinuxARM/x265/x265"
-linux_arm_h264aspt="$dirBinLinuxARM/h264_aspt/h264enc"
-linux_arm_vpx=$dirBinLinuxARM/vpx/vpxenc
+linux_arm_h265demo=linux-arm/hw265/h265demo
+linux_arm_h265demo_v2=linux-arm/hw265_v2/hw265app
+linux_arm_h265demo_v3=linux-arm/hw265_v3/hw265app
+linux_arm_ks=linux-arm/ks/ks_encoder
+linux_arm_x265=linux-arm/x265/x265
+linux_arm_h264aspt=linux-arm/h264_aspt/h264enc
+linux_arm_vpx=linux-arm/vpx/vpxenc
 linux_arm_vp8=$linux_arm_vpx
 linux_arm_vp9=$linux_arm_vpx
 
@@ -90,19 +91,25 @@ codec_exe()
 {
 	local codecId=$1; shift
 	local target=$1; shift
-	local encoderExe=
+    local do_not_exit=${1:-}
+	local encExe=
 
 	eval "local cachedVal=\${CACHE_path_${codecId}_${target}:-}"
 	if [[ -n "$cachedVal" ]]; then
-		encoderExe=$cachedVal
+		encExe=$cachedVal
 	else
-		exe_${codecId} $target; encoderExe=$REPLY
-		[[ -f "$encoderExe" ]] || error_exit "encoder does not exist '$encoderExe'"
-		encoderExe=$(ospath "$encoderExe")
-		eval "CACHE_path_${codecId}_${target}=$encoderExe"
+        if [[ $(type -t exe_${codecId}) != "function" ]]; then
+            [[ -n $do_not_exit ]] && echo "warning: no executable associated with '$codecId' codecId." >&2 && return 1
+            error_exit "no executable associated with '$codecId' codecId."
+        fi
+		exe_${codecId} $target; encExe=${REPLY//\\//}
+		if [[ ! -f "$DIR_BIN/$encExe" ]]; then
+            [[ -n $do_not_exit ]] && echo "warning: can't find '$DIR_BIN/$encExe'" && return 1
+            error_exit "can't find '$DIR_BIN/$encExe'"
+        fi
+		eval "CACHE_path_${codecId}_${target}=$encExe"
 	fi
-
-	REPLY=$encoderExe
+	REPLY=$encExe
 }
 codec_hash()
 {
@@ -114,9 +121,9 @@ codec_hash()
 	if [[ -n "$cachedVal" ]]; then
 		hash=$cachedVal
 	else
-		local encoderExe
-		codec_exe $codecId $target; encoderExe=$REPLY
-		hash=$(md5sum ${encoderExe//\\//})
+		local encExe
+		codec_exe $codecId $target; encExe=$REPLY
+		hash=$(md5sum "$DIR_BIN/$encExe")
 		hash=${hash% *}
 		hash=${codecId}_${hash::8}
 		eval "CACHE_hash_${codecId}=$hash"
@@ -154,7 +161,7 @@ codec_verify()
 {
 	local remote=$1; shift
 	local target=$1; shift
-	local CODECS="$*" codecId= cmd= codecList=
+	local CODECS="$*" codecId= cmd= codecList= encExe=
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
@@ -164,19 +171,16 @@ codec_verify()
     pushd "$dirOut" >/dev/null
 
 	for codecId in $CODECS; do
-		exe_${codecId} $target; encoderExe=$REPLY
-		if [[ -z "$encoderExe" ]]; then
-			echo "warning: no executable associated with '$codecId' codecId. Remove '$codecId' from a list." >&2
-			continue
-        fi
-		if [[ ! -f "$encoderExe" ]]; then
-			echo "warning: can't find '$encoderExe' executable. Remove '$codecId' from a list." >&2
+		if codec_exe $codecId $target do_not_exit; then
+            encExe=$REPLY
+        else
+			echo "Remove '$codecId' from a list." >&2
 			continue
 		fi
 		if $remote; then
 			codecList="$codecList $codecId"
         else
-			local cmd=$encoderExe
+			local cmd=$DIR_BIN/$encExe
 			# temporary hack, for backward compatibility (remove later)
 			if [[ $codecId == h265demo ]]; then
 				echo "" > h265demo.cfg
@@ -206,9 +210,15 @@ codec_verify()
 		TARGET_exec "mkdir -p $remoteDirBin"
 		print_console "Push codecs to remote machine $remoteDirBin ...\n"
 		for codecId in $CODECS; do
-            codec_exe $codecId $target; encoderExe=$REPLY
-			TARGET_push "$(dirname $encoderExe)/." $remoteDirBin
-			TARGET_exec "chmod +x $remoteDirBin/$(basename $encoderExe)"
+            codec_exe $codecId $target; encExe=$REPLY
+
+            local remoteEncExe=$remoteDirBin/$encExe
+            # push directory content since executable can use dynamic libraries
+            local encDir=${encExe%/*} remoteEncDir=${remoteEncExe%/*}
+            print_console "$DIR_BIN/$encDir -> $remoteEncDir\r"
+            TARGET_exec "mkdir -p $remoteEncDir"
+			TARGET_push "$DIR_BIN/$encDir/." "$remoteEncDir"
+			TARGET_exec "chmod +x $remoteEncExe"
 	    done
 	fi
 	REPLY=$CODECS

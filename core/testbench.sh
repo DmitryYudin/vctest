@@ -20,7 +20,8 @@ VECTORS="
 	akiyo_352x288_30fps.yuv
 	foreman_352x288_30fps.yuv
 "
-DIR_OUT="$dirScript"/../out
+DIR_OUT=$(ospath "$dirScript"/../out)
+DIR_VEC=$(ospath "$dirScript"/../vectors)
 NCPU=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
@@ -103,10 +104,6 @@ entrypoint()
 
     # Currently only used by bd-rate script
     REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
-
-    # prepend with 'vectors/'
-    local dirVect=$(ospath "$dirScript/../vectors")
-    VECTORS=$(for i in $VECTORS; do echo "$dirVect"/$i; done)
 
 	target=${target:-windows}
 	PRESETS=${PRESETS:--}
@@ -255,34 +252,34 @@ entrypoint()
 vectors_verify()
 {
 	local remote=$1; shift
-	local VECTORS="$*" vec= vecList=
+	local VECTORS="$*"
 
+	local VECTORS_REL= vec=
 	for vec in $VECTORS; do
-		if [[ -f "$vec" ]]; then
-			vecList="$vecList $vec"
+		if [[ -f "$DIR_VEC/$vec" ]]; then
+            relative_path "$DIR_VEC/$vec" "$DIR_VEC"; vec=$REPLY # normalize name if any
+			VECTORS_REL="$VECTORS_REL $vec"
 		else
-			echo "warning: can't find vector. Remove '$vec' from a list." >&2
+			echo "warning: can't find vector in '$DIR_VEC'. Remove '$vec' from a list." >&2
 		fi
 	done
-	VECTORS=${vecList# }
-
-	local VECTORS_ABS=
-	for vec in $VECTORS; do
-		VECTORS_ABS="$VECTORS_ABS $(ospath "$vec")"
-	done
+	VECTORS=${VECTORS_REL# }
 
 	if $remote; then
-		local remoteDirVec
+		local remoteDirVec= targetDirPrev=
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
 		print_console "Push vectors to remote machine $remoteDirVec ...\n"
-		TARGET_exec "mkdir -p $remoteDirVec"
-		for vec in $VECTORS_ABS; do
+		for vec in $VECTORS_REL; do
             print_console "$vec\r"
-			TARGET_pushFileOnce "$(ospath $vec)" $remoteDirVec/${vec##*/}
+            local targetDir=$remoteDirVec/${vec%/*}
+            if [[ "$targetDirPrev" != "$targetDir" ]]; then
+        		TARGET_exec "mkdir -p $targetDir"
+                targetDirPrev=$targetDir
+            fi
+			TARGET_pushFileOnce "$DIR_VEC/$vec" "$remoteDirVec/$vec"
 		done
 	fi
-
-	REPLY=$VECTORS_ABS
+	REPLY=$VECTORS
 }
 
 prepare_optionsFile()
@@ -303,9 +300,9 @@ prepare_optionsFile()
 		fi
 		[[ $preset == '-' ]] && { codec_default_preset "$codecId"; preset=$REPLY; }
 		local srcRes= srcFps= srcNumFr=
-		detect_resolution_string "$src"; srcRes=$REPLY
-		detect_framerate_string "$src"; srcFps=$REPLY
-		detect_frame_num "$src" "$srcRes"; srcNumFr=$REPLY
+		detect_resolution_string "$DIR_VEC/$src"; srcRes=$REPLY
+		detect_framerate_string "$DIR_VEC/$src"; srcFps=$REPLY
+		detect_frame_num "$DIR_VEC/$src" "$srcRes"; srcNumFr=$REPLY
 
 		local args="--res "$srcRes" --fps $srcFps --threads $THREADS"
 		[[ $bitrate == '-' ]] || args="$args --bitrate $bitrate"
@@ -332,11 +329,11 @@ prepare_optionsFile()
 
 	local hashTmpFile=$(mktemp)
 	while read data; do
-		local encCmdArgs SRC
+		local encCmdArgs src
 		dict_getValueEOL "$data" encCmdArgs; encCmdArgs=$REPLY
-		dict_getValue "$data" SRC; SRC=$REPLY
+		dict_getValue "$data" src; src=$REPLY
 		local args=${encCmdArgs// /}   # remove all whitespaces
-		echo "$SRC $args"
+		echo "$src $args"
 	done < $infoTmpFile | python "$(ospath "$dirScript")/md5sum.py" | tr -d $'\r' > $hashTmpFile
 
 	local data encCmdHash
@@ -362,7 +359,7 @@ start_cpu_monitor()
 	local encExe=
 	codec_exe $codecId windows; encExe=$REPLY
 
-	local name=$(basename "$encExe"); name=${name%.*}
+	local name=${encExe##*/}; name=${name%.*}
 
 	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
 	if [[ $cpu_monitor_type == windows ]]; then
@@ -567,16 +564,15 @@ encode_single_file()
 	dict_getValue "$info" dst; dst=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
-	if $remote; then
-		local remoteDirBin= remoteExe=
-		local remoteDirVec= remoteSrc=
+	if ! $remote; then
+        encExe=$DIR_BIN/$encExe
+        src=$DIR_VEC/$src
+    else
+		local remoteDirBin= remoteDirVec=
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
-		remoteExe=$remoteDirBin/${encExe##*/}
-		remoteSrc=$remoteDirVec/${src##*/}
-
-		encExe=$remoteExe
-		src=$remoteSrc
+		encExe=$remoteDirBin/$encExe
+		src=$remoteDirVec/$src
 	fi
 	codec_cmdSrc $codecId "$src"; encCmdSrc=$REPLY
 	codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
@@ -687,7 +683,7 @@ decode_single_file()
 	local info= src= dst=
     { read -r info; } < "info.kw"
 
-	dict_getValue "$info" src; src=$(ospath "$REPLY")
+	dict_getValue "$info" src; src=$REPLY
 	dict_getValue "$info" dst; dst=$REPLY
 
 	local recon=$(basename "$dst").yuv
@@ -712,7 +708,7 @@ decode_single_file()
 	echo "$kbps" > $kbpsLog
 
 	# ffmpeg does not accept filename in C:/... format as a filter option
-	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i "$src" -s $srcRes -i "$recon" -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
+	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i "$DIR_VEC/$src" -s $srcRes -i "$recon" -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
 		echo "$log" && return 1
 	fi
 	rm -f "$recon"
