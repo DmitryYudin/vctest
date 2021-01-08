@@ -10,6 +10,7 @@ build*/
 *.yuv
 *.y4m
 *.m4a
+*.nut
 *.wav
 *.pcm
 *.log
@@ -29,6 +30,7 @@ out*/
 *tmp*/
 *result*/
 report/
+*vectors*/
 __pycache__
 bin/
 *.local

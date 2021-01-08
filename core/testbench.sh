@@ -11,20 +11,22 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 
 PRMS="28 34 39 44"
 REPORT=report.log
-REPORT_KW=${REPORT%.*}.kw
-CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo"
+REPORT_KW=
+CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo "\
+"h264aspt vp8 vp9"
 PRESETS=
 THREADS=1
 VECTORS="
-	$dirScript/../vectors/akiyo_cif.yuv
-	$dirScript/../vectors/foreman_cif.yuv
+	akiyo_352x288_30fps.yuv
+	foreman_352x288_30fps.yuv
 "
-DIR_OUT='out'
+DIR_OUT=$(ospath "$dirScript"/../out)
+DIR_VEC=$(ospath "$dirScript"/../vectors)
 NCPU=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-readonly dirTmp=tmp/$timestamp
+readonly dirTmp=$(tempdir)/vctest/$timestamp
 
 usage()
 {
@@ -34,9 +36,9 @@ usage()
 
 	Options:
 	    -h|--help        Print help.
-	    -i|--input   <x> Input YUV files. Multiple '-i vec' allowed.
-	    -d|--dir     <x> Output directory. Default: "$DIR_OUT"
-	    -o|--output  <x> Report path.
+	    -i|--input   <x> Input YUV files relative to '/vectors' directory. Multiple '-i vec' allowed.
+	                     '/vectors' <=> '$(ospath "$dirScript/../vectors")'
+	    -o|--output  <x> Report path. Default: "$REPORT".
 	    -c|--codec   <x> Codecs list. Default: "$CODECS".
 	    -t|--threads <x> Number of threads to use
 	    -p|--prms    <x> Bitrate (kbps) or QP list. Default: "$PRMS".
@@ -52,6 +54,9 @@ usage()
 	                       h265demo: 6 *5 4 3 2 1
 	                       h265demo_v2: 6 *5   3 2
 	                       h264demo: N/A
+	                       h264aspt: 0 (slow) - 10 (fast)
+	                       vp8: 0 (slow) - 16 (fast)
+	                       vp9: 0 (slow) -  9 (fast)
 	    -j|--ncpu    <x> Number of encoders to run in parallel. The value of '0' will run as many encoders as many
 	                     CPUs available. Default: $NCPU
 	                     Note, execution time based profiling data (CPU consumption and FPS estimation) is not
@@ -59,20 +64,20 @@ usage()
 	       --hide        Do not print legend and header.
 	       --adb         Run Android@ARM using ADB. | Credentials are read from 'remote.local' file.
 	       --ssh         Run Linux@ARM using SSH.   |         (see example for details)
+	       --force       Invalidate results cache
 	EOF
 }
 
 entrypoint()
 {
-	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_dirOut= cmd_ncpu= cmd_endofflags=
-	local hide_banner= target=
+	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_ncpu= cmd_endofflags=
+	local hide_banner= target= force=
 	local remote=false targetInfo=
 	while [[ "$#" -gt 0 ]]; do
 		local nargs=2
 		case $1 in
 			-h|--help)		usage && return;;
 			-i|--in*) 		cmd_vec="$cmd_vec $2";;
-			-d|--dir)		cmd_dirOut=$2;;
 			-o|--out*) 		cmd_report=$2;;
 			-c|--codec*) 	cmd_codecs=$2;;
 			-t|--thread*)   cmd_threads=$2;;
@@ -82,14 +87,14 @@ entrypoint()
 			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; remote=true; nargs=1;;
 			   --ssh)       target=ssh; remote=true; nargs=1;;
+               --force)     force=1; nargs=1;;
 			   --)			cmd_endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
 		shift $nargs
 		[[ -n "$cmd_endofflags" ]] && break
 	done
-	[[ -n "$cmd_dirOut" ]] && DIR_OUT=$cmd_dirOut
-	[[ -n "$cmd_report" ]] && REPORT=$cmd_report && REPORT_KW=${REPORT%.*}.kw
+	[[ -n "$cmd_report" ]] && REPORT=${cmd_report//\\//}
 	[[ -n "$cmd_vec" ]] && VECTORS=${cmd_vec# }
 	[[ -n "$cmd_codecs" ]] && CODECS=$cmd_codecs
 	[[ -n "$cmd_threads" ]] && THREADS=$cmd_threads
@@ -97,13 +102,16 @@ entrypoint()
 	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
 	[[ -n "$cmd_ncpu" ]] && NCPU=$cmd_ncpu
 
+    # Currently only used by bd-rate script
+    REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
+
 	target=${target:-windows}
 	PRESETS=${PRESETS:--}
 	# for multithreaded run, run in single process to get valid cpu usage estimation
 	[[ $THREADS -gt 1 ]] && NCPU=1
 
 	if $remote; then
-		TARGET_setTarget $target remote.local
+		TARGET_setTarget $target "$dirScript"/../remote.local
 		TARGET_getFingerprint; targetInfo=$REPLY
 	fi
 	if [[ -n "$cmd_endofflags" ]]; then
@@ -122,12 +130,14 @@ entrypoint()
 
 	local startSec=$SECONDS
 
+    mkdir -p "$dirTmp"
+
 	#
 	# Scheduling
 	#
 	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS" "$PRESETS"
 
-	local optionsFile=options.txt
+	local optionsFile="$dirTmp"/options.txt
 	prepare_optionsFile $target "$optionsFile"
 
 	local encodeList= decodeList= parseList= reportList=
@@ -139,7 +149,7 @@ entrypoint()
 		local outputDir="$DIR_OUT/$outputDirRel"
 
 		local encode=false
-		if [[ ! -f "$outputDir/encoded.ts" ]]; then
+		if [[ -n "$force" || ! -f "$outputDir/encoded.ts" ]]; then
 			encode=true
 		elif [[ $NCPU -eq 1 && ! -f "$outputDir/cpu.log" ]]; then
 			# cpu load monitoring is currently disabled for a remote run
@@ -166,13 +176,12 @@ entrypoint()
 		progress_next "$outputDirRel"
 
 	done < $optionsFile
-	rm -f $optionsFile
+	rm -f "$optionsFile"
 	progress_end
 
 	local self
 	relative_path "$0"; self=$REPLY # just to make output look nicely
 
-    mkdir -p $dirTmp
 	local testplan=$dirTmp/testplan.txt
 
 	#
@@ -243,34 +252,34 @@ entrypoint()
 vectors_verify()
 {
 	local remote=$1; shift
-	local VECTORS="$*" vec= vecList=
+	local VECTORS="$*"
 
+	local VECTORS_REL= vec=
 	for vec in $VECTORS; do
-		if [[ -f "$vec" ]]; then
-			vecList="$vecList $vec"
+		if [[ -f "$DIR_VEC/$vec" ]]; then
+            relative_path "$DIR_VEC/$vec" "$DIR_VEC"; vec=$REPLY # normalize name if any
+			VECTORS_REL="$VECTORS_REL $vec"
 		else
-			echo "warning: can't find vector. Remove '$vec' from a list."
+			echo "warning: can't find vector in '$DIR_VEC'. Remove '$vec' from a list." >&2
 		fi
 	done
-	VECTORS=${vecList# }
-
-	local VECTORS_ABS=
-	for vec in $VECTORS; do
-		VECTORS_ABS="$VECTORS_ABS $(realpath "$vec")"
-	done
+	VECTORS=${VECTORS_REL# }
 
 	if $remote; then
-		local remoteDirVec
+		local remoteDirVec= targetDirPrev=
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
-		echo "Push vectors to remote machine $remoteDirVec ..."
-		TARGET_exec "mkdir -p $remoteDirVec"
-		for vec in $VECTORS_ABS; do
+		print_console "Push vectors to remote machine $remoteDirVec ...\n"
+		for vec in $VECTORS_REL; do
             print_console "$vec\r"
-			TARGET_pushFileOnce "$(ospath $vec)" $remoteDirVec/${vec##*/}
+            local targetDir=$remoteDirVec/${vec%/*}
+            if [[ "$targetDirPrev" != "$targetDir" ]]; then
+        		TARGET_exec "mkdir -p $targetDir"
+                targetDirPrev=$targetDir
+            fi
+			TARGET_pushFileOnce "$DIR_VEC/$vec" "$remoteDirVec/$vec"
 		done
 	fi
-
-	REPLY=$VECTORS_ABS
+	REPLY=$VECTORS
 }
 
 prepare_optionsFile()
@@ -291,9 +300,9 @@ prepare_optionsFile()
 		fi
 		[[ $preset == '-' ]] && { codec_default_preset "$codecId"; preset=$REPLY; }
 		local srcRes= srcFps= srcNumFr=
-		detect_resolution_string "$src"; srcRes=$REPLY
-		detect_framerate_string "$src"; srcFps=$REPLY
-		detect_frame_num "$src" "$srcRes"; srcNumFr=$REPLY
+		detect_resolution_string "$DIR_VEC/$src"; srcRes=$REPLY
+		detect_framerate_string "$DIR_VEC/$src"; srcFps=$REPLY
+		detect_frame_num "$DIR_VEC/$src" "$srcRes"; srcNumFr=$REPLY
 
 		local args="--res "$srcRes" --fps $srcFps --threads $THREADS"
 		[[ $bitrate == '-' ]] || args="$args --bitrate $bitrate"
@@ -320,11 +329,11 @@ prepare_optionsFile()
 
 	local hashTmpFile=$(mktemp)
 	while read data; do
-		local encCmdArgs SRC
+		local encCmdArgs src
 		dict_getValueEOL "$data" encCmdArgs; encCmdArgs=$REPLY
-		dict_getValue "$data" SRC; SRC=$REPLY
+		dict_getValue "$data" src; src=$REPLY
 		local args=${encCmdArgs// /}   # remove all whitespaces
-		echo "$SRC $args"
+		echo "$src $args"
 	done < $infoTmpFile | python "$(ospath "$dirScript")/md5sum.py" | tr -d $'\r' > $hashTmpFile
 
 	local data encCmdHash
@@ -350,7 +359,7 @@ start_cpu_monitor()
 	local encExe=
 	codec_exe $codecId windows; encExe=$REPLY
 
-	local name=$(basename "$encExe"); name=${name%.*}
+	local name=${encExe##*/}; name=${name%.*}
 
 	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
 	if [[ $cpu_monitor_type == windows ]]; then
@@ -555,16 +564,15 @@ encode_single_file()
 	dict_getValue "$info" dst; dst=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
-	if $remote; then
-		local remoteDirBin= remoteExe=
-		local remoteDirVec= remoteSrc=
+	if ! $remote; then
+        encExe=$DIR_BIN/$encExe
+        src=$DIR_VEC/$src
+    else
+		local remoteDirBin= remoteDirVec=
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
-		remoteExe=$remoteDirBin/${encExe##*/}
-		remoteSrc=$remoteDirVec/${src##*/}
-
-		encExe=$remoteExe
-		src=$remoteSrc
+		encExe=$remoteDirBin/$encExe
+		src=$remoteDirVec/$src
 	fi
 	codec_cmdSrc $codecId "$src"; encCmdSrc=$REPLY
 	codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
@@ -675,7 +683,7 @@ decode_single_file()
 	local info= src= dst=
     { read -r info; } < "info.kw"
 
-	dict_getValue "$info" src; src=$(ospath "$REPLY")
+	dict_getValue "$info" src; src=$REPLY
 	dict_getValue "$info" dst; dst=$REPLY
 
 	local recon=$(basename "$dst").yuv
@@ -700,7 +708,7 @@ decode_single_file()
 	echo "$kbps" > $kbpsLog
 
 	# ffmpeg does not accept filename in C:/... format as a filter option
-	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i "$src" -s $srcRes -i "$recon" -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
+	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i "$DIR_VEC/$src" -s $srcRes -i "$recon" -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
 		echo "$log" && return 1
 	fi
 	rm -f "$recon"
@@ -900,8 +908,14 @@ parse_stdoutLog()
 		;;
 		h264demo)
 			fps=$(grep -i 'Tests completed' "$log" | tr -s ' ' | cut -d' ' -f 1)
-			snr=$(grep -i 'Tests completed' "$log" | tr -s ' ' | cut -d' ' -f 5)
 		;;
+		h264aspt)
+			fps=$(grep -i 'fps$' "$log" | tr -s ' ' | cut -d' ' -f 3)
+		;;
+		vp8|vp9) # be carefull with multipass
+            fps=$(cat "$log" | tr "\r" "\n" | grep -E '\([0-9]{1,}\.[0-9]{1,} fps\)' | tail -n 1 | tr -d '()' | tr -s ' ' | cut -d' ' -f 10)
+		;;
+
 		*) error_exit "unknown encoder: $codecId";;
 	esac
 

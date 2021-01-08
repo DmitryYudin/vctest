@@ -12,30 +12,56 @@
 #	codec_cmdDst(id, src)     - set output file name
 #
 
-dirBinWindows="$dirScript/../bin/windows"
-windows_ashevc="$dirBinWindows/ashevc/cli_ashevc.exe"
-windows_x265="$dirBinWindows/x265/x265.exe"
-windows_kvazaar="$dirBinWindows/kvazaar/kvazaar.exe"
-windows_kingsoft="$dirBinWindows/kingsoft/AppEncoder_x64.exe"
-windows_intel="$dirBinWindows/intel/sample_encode.exe"
-windows_h265demo="$dirBinWindows/hw265/h265EncDemo.exe"
-windows_h265demo_v2="$dirBinWindows/hw265_v2/hw265app.exe"
-windows_h265demo_v3="$dirBinWindows/hw265_v3/hw265app.exe"
-windows_h264demo="$dirBinWindows/hme264/HW264_Encoder_Demo.exe"
+dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 
-dirBinAndroid="$dirScript/../bin/android"
-android_kingsoft="$dirBinAndroid/kingsoft/appencoder"
-android_ks="$dirBinAndroid/ks/ks_encoder"
-android_h265demo="$dirBinAndroid/hw265/h265demo"
-android_h265demo_v3="$dirBinAndroid/hw265_v3/hw265app"
-android_x265="$dirBinAndroid/x265/x265"
+DIR_BIN=$(ospath "$dirScript"/../bin)
 
-dirBinLinuxARM="$dirScript/../bin/linux-arm"
-linux_arm_h265demo="$dirBinLinuxARM/hw265/h265demo"
-linux_arm_h265demo_v2="$dirBinLinuxARM/hw265_v2/hw265app"
-linux_arm_h265demo_v3="$dirBinLinuxARM/hw265_v3/hw265app"
-linux_arm_ks="$dirBinLinuxARM/ks/ks_encoder"
-linux_arm_x265="$dirBinLinuxARM/x265/x265"
+windows_ashevc=windows/ashevc/cli_ashevc.exe
+windows_x265=windows/x265/x265.exe
+windows_kvazaar=windows/kvazaar/kvazaar.exe
+windows_kingsoft=windows/kingsoft/AppEncoder_x64.exe
+windows_intel=windows/intel/sample_encode.exe
+windows_h265demo=windows/hw265/h265EncDemo.exe
+windows_h265demo_v2=windows/hw265_v2/hw265app.exe
+windows_h265demo_v3=windows/hw265_v3/hw265app.exe
+windows_h264demo=windows/hme264/HW264_Encoder_Demo.exe
+windows_h264aspt=windows/h264_aspt/h264enc.exe
+windows_vpx=windows/vpx/vpxenc.exe
+windows_vp8=$windows_vpx
+windows_vp9=$windows_vpx
+
+android_kingsoft=android/kingsoft/appencoder
+android_ks=android/ks/ks_encoder
+android_h265demo=android/hw265/h265demo
+android_h265demo_v3=android/hw265_v3/hw265app
+android_x265=android/x265/x265
+android_h264aspt=android/h264_aspt/h264enc
+android_vpx=android/vpx/vpxenc
+android_vp8=$android_vpx
+android_vp9=$android_vpx
+
+linux_arm_h265demo=linux-arm/hw265/h265demo
+linux_arm_h265demo_v2=linux-arm/hw265_v2/hw265app
+linux_arm_h265demo_v3=linux-arm/hw265_v3/hw265app
+linux_arm_ks=linux-arm/ks/ks_encoder
+linux_arm_x265=linux-arm/x265/x265
+linux_arm_h264aspt=linux-arm/h264_aspt/h264enc
+linux_arm_vpx=linux-arm/vpx/vpxenc
+linux_arm_vp8=$linux_arm_vpx
+linux_arm_vp9=$linux_arm_vpx
+
+codec_get_knownId()
+{
+    REPLY=
+    REPLY="$REPLY ashevc x265 kvazaar"
+    REPLY="$REPLY kingsoft ks"
+    REPLY="$REPLY intel_sw intel_hw"
+    REPLY="$REPLY h265demo h265demo_v2 h265demo_v3"
+    REPLY="$REPLY h264demo"
+    REPLY="$REPLY h264aspt"
+    REPLY="$REPLY vp8 vp9"
+    REPLY=${REPLY# }
+}
 
 codec_default_preset()
 {
@@ -53,6 +79,9 @@ codec_default_preset()
 		h265demo_v2)preset=6;; # 2,3,5,6
 		h265demo_v3)preset=6;;
 		h264demo)	preset=-;;
+        h264aspt)	preset=3;; # 0 - 10
+        vp8)	    preset=5;; # 0 - 16
+        vp9)	    preset=9;; # 0 -  9
 		*) error_exit "unknown encoder: $codecId";;
 	esac
 
@@ -62,19 +91,25 @@ codec_exe()
 {
 	local codecId=$1; shift
 	local target=$1; shift
-	local encoderExe=
+    local do_not_exit=${1:-}
+	local encExe=
 
 	eval "local cachedVal=\${CACHE_path_${codecId}_${target}:-}"
 	if [[ -n "$cachedVal" ]]; then
-		encoderExe=$cachedVal
+		encExe=$cachedVal
 	else
-		exe_${codecId} $target; encoderExe=$REPLY
-		[[ -f "$encoderExe" ]] || error_exit "encoder does not exist '$encoderExe'"
-		encoderExe=$(realpath "$encoderExe")
-		eval "CACHE_path_${codecId}_${target}=$encoderExe"
+        if [[ $(type -t exe_${codecId}) != "function" ]]; then
+            [[ -n $do_not_exit ]] && echo "warning: no executable associated with '$codecId' codecId." >&2 && return 1
+            error_exit "no executable associated with '$codecId' codecId."
+        fi
+		exe_${codecId} $target; encExe=${REPLY//\\//}
+		if [[ ! -f "$DIR_BIN/$encExe" ]]; then
+            [[ -n $do_not_exit ]] && echo "warning: can't find '$DIR_BIN/$encExe'" && return 1
+            error_exit "can't find '$DIR_BIN/$encExe'"
+        fi
+		eval "CACHE_path_${codecId}_${target}=$encExe"
 	fi
-
-	REPLY=$encoderExe
+	REPLY=$encExe
 }
 codec_hash()
 {
@@ -86,9 +121,9 @@ codec_hash()
 	if [[ -n "$cachedVal" ]]; then
 		hash=$cachedVal
 	else
-		local encoderExe
-		codec_exe $codecId $target; encoderExe=$REPLY
-		hash=$(md5sum ${encoderExe//\\//})
+		local encExe
+		codec_exe $codecId $target; encExe=$REPLY
+		hash=$(md5sum "$DIR_BIN/$encExe")
 		hash=${hash% *}
 		hash=${codecId}_${hash::8}
 		eval "CACHE_hash_${codecId}=$hash"
@@ -99,8 +134,8 @@ codec_cmdArgs()
 {
 	local codecId=$1; shift
 	cmd_${codecId} "$@"
-	REPLY=${REPLY# }
-	REPLY=${REPLY% }
+    set -- $REPLY # remove extra spaces
+	REPLY=$*
 }
 codec_cmdHash()
 {
@@ -114,7 +149,7 @@ codec_cmdSrc()
 {
 	local codecId=$1; shift
 	local src=$1; shift
-	src_${codecId} "$(ospath $src)"
+	src_${codecId} "$src"
 }
 codec_cmdDst()
 {
@@ -126,38 +161,43 @@ codec_verify()
 {
 	local remote=$1; shift
 	local target=$1; shift
-	local CODECS="$*" codecId= cmd= codecList=
+	local CODECS="$*" codecId= cmd= codecList= encExe=
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
+    local self=$(ospath "$dirScript/${BASH_SOURCE##*/}")
+
+    # Avoid temporary files to appear in a root folder
+    pushd "$dirOut" >/dev/null
 
 	for codecId in $CODECS; do
-		exe_${codecId} $target; encoderExe=$REPLY
-
-		if [[ -f "$encoderExe" ]]; then
-			codecList="$codecList $codecId"
-		else
-			echo "warning: can't find executable. Remove '$codecId' from a list."
+		if codec_exe $codecId $target do_not_exit; then
+            encExe=$REPLY
+        else
+			echo "Remove '$codecId' from a list." >&2
 			continue
 		fi
-		if ! $remote; then
-			local cmd=$encoderExe
+		if $remote; then
+			codecList="$codecList $codecId"
+        else
+			local cmd=$DIR_BIN/$encExe
 			# temporary hack, for backward compatibility (remove later)
 			if [[ $codecId == h265demo ]]; then
-				echo "" > $dirOut/h265demo.cfg
-				cmd="$cmd -c $(ospath "$dirOut/h265demo.cfg")"
+				echo "" > h265demo.cfg
+				cmd="$cmd -c h265demo.cfg"
 			fi
 			codec_cmdArgs $codecId --res 160x96 --fps 30; cmd="$cmd $REPLY"
-			codec_cmdSrc $codecId "$0"; cmd="$cmd $REPLY"
-			codec_cmdDst $codecId "$dirOut/out.tmp"; cmd="$cmd $REPLY"
+			codec_cmdSrc $codecId "$self"; cmd="$cmd $REPLY"
+			codec_cmdDst $codecId out.tmp; cmd="$cmd $REPLY"
 
 			if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
 				echo "warning: encoding error. Remove '$codecId' from a list." >&2;
-				removeList="$removeList $codecId"
+            else
+    			codecList="$codecList $codecId"
 			fi
-			rm -f "$dirOut/out.tmp"
 		fi
 	done
+    popd >/dev/null
 	CODECS=${codecList# }
 
 	rm -rf -- "$dirOut"
@@ -168,12 +208,17 @@ codec_verify()
 		local remoteDirBin
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
 		TARGET_exec "mkdir -p $remoteDirBin"
-		echo "Push codecs to remote machine $remoteDirBin ..."
+		print_console "Push codecs to remote machine $remoteDirBin ...\n"
 		for codecId in $CODECS; do
-			exe_${codecId} $target; encoderExe=$REPLY
-			encoderExe=$(ospath $encoderExe)
-			TARGET_push "$(dirname $encoderExe)/." $remoteDirBin
-			TARGET_exec "chmod +x $remoteDirBin/$(basename $encoderExe)"
+            codec_exe $codecId $target; encExe=$REPLY
+
+            local remoteEncExe=$remoteDirBin/$encExe
+            # push directory content since executable can use dynamic libraries
+            local encDir=${encExe%/*} remoteEncDir=${remoteEncExe%/*}
+            print_console "$DIR_BIN/$encDir -> $remoteEncDir\r"
+            TARGET_exec "mkdir -p $remoteEncDir"
+			TARGET_push "$DIR_BIN/$encDir/." "$remoteEncDir"
+			TARGET_exec "chmod +x $remoteEncExe"
 	    done
 	fi
 	REPLY=$CODECS
@@ -576,7 +621,9 @@ cmd_h264demo()
 			   --res) 		args="$args Resolution = $2"
 							args="$args StrideWH = $2";;
 			   --fps) 		args="$args iInputFps = $2"
-							args="$args fFrameRate = $2";;
+							args="$args fFrameRate = $2"
+			        	    args="$args iMinQP = 1"
+							args="$args iMaxQP = 51";;
 			   --qp)     	args="$args iMinQP = $2"
 							args="$args iMaxQP = $2";;
 			   --bitrate)   bitrateKbps=$2;;
@@ -611,6 +658,107 @@ cmd_h264demo()
 	args="$args bReconstuctFrame = 0"
 	args="$args Framecount = 999999"
 
-#	REPLY="--test $args"
+	REPLY="--test $args"   # produce output, but have slow speed
+#	REPLY="--speed $args"  # no output, but demonstrate high speed
+}
+
+exe_h264aspt() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_h264aspt;
+				 [[ $1 == adb     ]] && REPLY=$android_h264aspt;
+				 [[ $1 == ssh     ]] && REPLY=$linux_arm_h264aspt;
+				 return 0;
+}
+src_h264aspt() { REPLY="-i $1"; }
+dst_h264aspt() { REPLY="-o $1"; }
+cmd_h264aspt()
+{
+	local args= threads=1 res=
+	while [ "$#" -gt 0 ]; do
+		case $1 in
+			-i|--input) 	args="$args -i $2";;
+			-o|--output) 	args="$args -o $2";;
+			   --res) 		res=$2;;
+			   --fps) 		args="$args --fps $2";;
+			   --preset) 	args="$args --quality $2";; # 0 (slow) - 10 (fast)
+			   --qp)     	args="$args --bitrate 10000 --qpmin $2 --qpmax $2";; # any valid bitrate
+			   --bitrate)   args="$args --bitrate $2";;
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+	local width=${res%%x*}
+	local height=${res##*x}
+	args="$args -w $width"
+	args="$args -h $height"
+
+#	args="$args -threads $threads"
+	args="$args --keyint 0"         	# Only first picture is intra.
+
 	REPLY=$args
+}
+
+exe_VPX() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_vpx;
+				 [[ $1 == adb     ]] && REPLY=$android_vpx;
+				 [[ $1 == ssh     ]] && REPLY=$linux_arm_vpx;
+				 return 0;
+}
+src_vpx() { REPLY="$1"; }
+dst_vpx() { REPLY="-o $1"; }
+cmd_vpx() # https://arxiv.org/pdf/2009.14165.pdf   [ we do not use --rt mode ]
+{
+	local args= threads=1 res=
+	while [ "$#" -gt 0 ]; do
+		case $1 in
+			-i|--input) 	args="$args $2";;
+			-o|--output) 	args="$args -o $2";;
+			   --res) 		res=$2;;
+			   --fps) 		args="$args --fps=$2/1";;
+			   --preset) 	args="$args --cpu-used=$2";;
+			   --qp)     	args="$args --target-bitrate=0  --end-usage=cq --cq-level=$2";; # any valid bitrate
+			   --bitrate)   args="$args --target-bitrate=$2 --end-usage=cbr";; # --max-intra-rate=$((3 * $2))";;
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+	local width=${res%%x*}
+	local height=${res##*x}
+	args="$args --width=$width --height=$height --threads=$threads"
+    args="$args --i420 --ivf"
+    args="$args --min-q=2 --max-q=56"
+    args="$args --lag-in-frames=0 --drop-frame=0 --resize-allowed=0 --error-resilient=0"
+    args="$args --undershoot-pct=100 --overshoot-pct=100"
+    args="$args --buf-sz=1000 --buf-initial-sz=500 --buf-optimal-sz=600"
+    args="$args --verbose"  # show settings
+    args="$args --max-intra-rate=300 --disable-kf --kf-min-dist=90000 --kf-max-dist=90000"
+    args="$args --passes=1" # vp9 uses two-pass by default
+
+	REPLY=$args
+}
+
+exe_vp8() { exe_VPX "$@"; }
+src_vp8() { src_vpx "$@"; }
+dst_vp8() { dst_vpx "$@"; }
+cmd_vp8() # https://www.webmproject.org/docs/encoder-parameters
+{
+    local args=;  # speed [0-16]: 0 - slowest; [4,5] - disable rdo
+    cmd_vpx "$@"; args="$args $REPLY"
+
+	args="$args --codec=vp8"
+    REPLY=$args
+}
+
+exe_vp9() { exe_VPX "$@"; }
+src_vp9() { src_vpx "$@"; }
+dst_vp9() { dst_vpx "$@"; }
+cmd_vp9()
+{
+    local args=; # speed [0-9]: 0 - slowest; [0,4] - VOD; [5-9] - Realtime
+    cmd_vpx "$@"; args="$args $REPLY"
+
+	args="$args --codec=vp9"
+	args="$args --tile-columns=0"
+    REPLY=$args
 }
