@@ -27,6 +27,9 @@ readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 readonly dirTmp=$(tempdir)/vctest/$timestamp
+readonly statExe=$dirScript/../'bin/TAppDecoder.exe'
+readonly parsePy=$dirScript/../'core/parser.py'
+
 
 usage()
 {
@@ -463,6 +466,7 @@ output_header()
 	printf 	-v str "%s %6s %6s %6s %6s"         "$str" gPSNR psnr-I psnr-P gSSIM
 	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
 	printf 	-v str "%s %9s %2s %-16s %-8s %s" 	"$str" PRESET TH CMD-HASH ENC-HASH SRC
+	printf 	-v str "%s %s %s %s" 	"$str" numIntra numInter numSkip
 
 #	print_console "$str\n"
 
@@ -486,6 +490,9 @@ output_legend()
 		QP         - QP value for fixed QP mode
 		BR         - Target bitrate.
 		TH         - Threads number.
+		numIntra   - Number of INTRA blocks in P/B slices
+		numInter   - Number of INTER blocks in P/B slices
+		numSkip    - Number of skip blocks (skipFlag == 1) in P/B slices
 	EOT
 	)
 
@@ -499,6 +506,7 @@ output_report()
 
 	local extFPS= intFPS= cpu= kbps= numI= avgI= avgP= peak= gPSNR= psnrI= psnrP= gSSIM=
 	local codecId= srcRes= srcFps= numFr= QP= BR= PRESET= TH= SRC= HASH= ENC=
+	local numIntra= numInter= numSkip=
 
 	dict_getValue "$dict" extFPS  ; extFPS=$REPLY
 	dict_getValue "$dict" intFPS  ; intFPS=$REPLY
@@ -523,13 +531,17 @@ output_report()
 	dict_getValue "$dict" SRC     ; SRC=$REPLY
 	dict_getValue "$dict" encCmdHash; HASH=$REPLY; HASH=${HASH::16}
 	dict_getValue "$dict" encExeHash; ENC=$REPLY ; ENC=${ENC##*_}
-
+	dict_getValue "$dict" numIntra; numIntra=$REPLY
+	dict_getValue "$dict" numInter; numInter=$REPLY
+	dict_getValue "$dict" numSkip; numSkip=$REPLY
+	
 	local str=
 	printf 	-v str    "%6s %8.3f %5s %5.0f"            "$extFPS" "$intFPS" "$cpu" "$kbps"
 	printf 	-v str "%s %3d %7.0f %6.0f %4.1f"   "$str" "$numI" "$avgI" "$avgP" "$peak"
 	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f" "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
 	printf 	-v str "%s %-11s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
 	printf 	-v str "%s %9s %2s %-16s %-8s %s" 	"$str" "$PRESET" "$TH" "$HASH" "$ENC" "$SRC"
+	printf 	-v str "%s %3d %3d %3d" 	"$str" "$numIntra" "$numInter" "$numSkip"
 
 #	print_console "$str\n"
 	echo "$str" >> $REPORT
@@ -695,13 +707,16 @@ decode_single_file()
 	local summaryLog=summary.log
 
 	local srcRes= srcFps= srcNumFr=
+	local statLog=stat.log
+	
 	dict_getValue "$info" srcRes; srcRes=$REPLY
 	dict_getValue "$info" srcFps; srcFps=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
 	$ffmpegExe -y -loglevel error -i "$dst" "$recon"
 	$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $infoLog
-
+	$statExe -b "$dst" > $statLog
+	
 	local sizeInBytes= kbps=
 	sizeInBytes=$(stat -c %s "$dst")
 	kbps=$(awk "BEGIN { print 8 * $sizeInBytes / ($srcNumFr/$srcFps) / 1000 }")
@@ -761,6 +776,8 @@ parse_single_file()
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
 	local summaryLog=summary.log
+	
+	local statLog=stat.log
 
 	local cpuAvg=- extFPS=- intFPS= framestat=
 	if [[ -f "$cpuLog" ]]; then # may not exist
@@ -772,8 +789,9 @@ parse_single_file()
 	fi
 	intFPS=$(parse_stdoutLog "$codecId" "$stdoutLog")
 	framestat=$(parse_framestat "$kbpsLog" "$summaryLog")
+	blockstat=$(python $parsePy $statLog)
 
-	local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg $framestat"
+	local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg $framestat $blockstat"
 	echo "$dict" > report.kw
 
 	date "+%Y.%m.%d-%H.%M.%S" > parsed.ts
