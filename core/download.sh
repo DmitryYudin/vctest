@@ -218,6 +218,7 @@ is_binary_package()
         ffmpeg-*) : ;;
         MediaSamples_MSDK_*) : ;;
         AppEncoder_x64.exe) : ;;
+        TAppDecoder.exe) : ;;
         appencoder) : ;;
         Win64-Release.zip) : ;;
         x265-64bit*) : ;;
@@ -396,6 +397,10 @@ install_from_cache()
             ;;
             AppEncoder_x64.exe)
                 dst="$DIR_BIN/windows/kingsoft"
+                make_link "$dst" "$src"
+            ;;
+            TAppDecoder.exe)
+                dst="$DIR_BIN"
                 make_link "$dst" "$src"
             ;;
             appencoder)
