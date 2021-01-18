@@ -17,7 +17,7 @@ https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/ASHEVCEnc.dll
 https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/VMFPlatform.dll
 https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/cli_ashevc.exe
 https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/ashevc_example.cfg
-https://github.com/akfilippov/bin/blob/master/TAppDecoder.exe
+https://api.github.com/repos/akfilippov/bin/contents/TAppDecoder.exe
 
 # Vectors
 http://trace.eas.asu.edu/yuv/akiyo/akiyo_qcif.7z
