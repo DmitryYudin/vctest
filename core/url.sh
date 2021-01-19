@@ -277,15 +277,14 @@ URL_headers_FORCE()
 }
 URL_headers_curl()	# only headers
 {
-	eval "curl $CURL_OPT $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC}  -L -I $@"
+	curl $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC} -L -I "$@"
 }
 URL_headers_curl_FORCE() # start download
 {
 	local stderr=$(mktemp url_headers.XXXXXX)
 	set +e; # note, with --max-filesize curl doesn't print 'Content-Length' header
-	eval curl $CURL_OPT $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC} -L "$@" \
+	curl $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC} -L "$@" \
         --max-time 5 --limit-rate 10K --dump-header - -o . 2>"$stderr"
-
 	local error_code=$?
 	set -e
 	case $error_code in
@@ -295,7 +294,7 @@ URL_headers_curl_FORCE() # start download
 		 *) cat "$stderr" 1>&2 ;;
 	esac
 	rm -rf "$stderr"
-	
+
 	return $error_code
 }
 
@@ -394,7 +393,7 @@ URL_download_curl()
 {
 	local url=$1; shift
 	local dst=$1; shift
-	eval "curl $CURL_OPT $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC} -o "$dst" -L "$url""
+	curl $__CURL_OPT ${URL_TIMEOUT_SEC:+ --connect-timeout $URL_TIMEOUT_SEC} -o "$dst" "$url"
 }
 
 URL_download_ps()
