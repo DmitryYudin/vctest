@@ -30,7 +30,6 @@ readonly dirTmp=$(tempdir)/vctest/$timestamp
 readonly statExe=$dirScript/../'bin/TAppDecoder.exe'
 readonly parsePy=$dirScript/../'core/parser.py'
 
-
 usage()
 {
 	cat	<<-EOF
@@ -705,9 +704,9 @@ decode_single_file()
 	local psnrLog=psnr.log
 	local frameLog=frame.log
 	local summaryLog=summary.log
+	local statLog=stat.log
 
 	local srcRes= srcFps= srcNumFr=
-	local statLog=stat.log
 	
 	dict_getValue "$info" srcRes; srcRes=$REPLY
 	dict_getValue "$info" srcFps; srcFps=$REPLY
@@ -776,7 +775,6 @@ parse_single_file()
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
 	local summaryLog=summary.log
-	
 	local statLog=stat.log
 
 	local cpuAvg=- extFPS=- intFPS= framestat=
