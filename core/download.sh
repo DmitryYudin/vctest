@@ -218,7 +218,7 @@ is_binary_package()
         ffmpeg-*) : ;;
         MediaSamples_MSDK_*) : ;;
         AppEncoder_x64.exe) : ;;
-        TAppDecoder.exe) : ;;
+        HM-Win64-Release.zip) : ;;
         appencoder) : ;;
         Win64-Release.zip) : ;;
         x265-64bit*) : ;;
@@ -399,9 +399,9 @@ install_from_cache()
                 dst="$DIR_BIN/windows/kingsoft"
                 make_link "$dst" "$src"
             ;;
-            TAppDecoder.exe)
+            HM-Win64-Release.zip)
                 dst="$DIR_BIN"
-                make_link "$dst" "$src"
+                $SevenZipExe x -y "$src" -o"$dst" >/dev/null
             ;;
             appencoder)
                 dst="$DIR_BIN/android/kingsoft"
