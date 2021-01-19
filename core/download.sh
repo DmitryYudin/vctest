@@ -300,8 +300,9 @@ download_in_cache()
 
     if [[ "$len" != 0 ]]; then
         local numBytes=$(stat -c %s "$dst")
-        [[ "$len" != "$numBytes" ]] && error_exit "file size does not match "\
-                "$len(header) != $numBytes(actual) $dst"
+        # 'url.sh' may report wrong 'length' if 'Transfer-Encoding: chunked'
+        [[ "$len" -gt "$numBytes" ]] && error_exit "file size does not match "\
+                "$len(header) > $numBytes(actual) $dst"
     fi
     DB_set_item "$url" $DB_STATUS $STATUS_DOWNLOADED
 
