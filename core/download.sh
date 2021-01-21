@@ -23,6 +23,7 @@ notify() {
 readonly DIR_BIN=$(ospath "$dirScript/../bin")
 DIR_VEC=$(ospath "$dirScript/../vectors")
 INPUT=
+ADDR=
 readonly DIR_CACHE=$DIR_VEC/cache
 readonly SevenZipExe=$DIR_BIN/7z
 readonly ffmpegExe=$DIR_BIN/ffmpeg
@@ -57,6 +58,7 @@ usage()
 	    -h|--help         Print help
 	    -i|--input        URLs list, one URL per line (default: $INPUT)
 	    -d|--dir          Subdirectory of './vectors' directory
+	       --addr         Server address propogated to URLs list file as \$ADDR variable
 	    --max-res         Video resolution limit in 'WxH' format (default: $MAX_FRAME_SIZE)
 	    --max-mb          File size limit in Mb (default: $MAX_FILE_SIZE_MB)
 	    --curl            Use 'curl' backend
@@ -84,6 +86,7 @@ entrypoint()
         case $1 in
             -h|--help)  usage && return;;
             -i|--in*)   INPUT=$2;;
+               --addr)  ADDR=$2;;
             -d|--dir)   DIR_VEC=$dirScript/../vectors/$2;;
             --max-res*) MAX_FRAME_SIZE=$2;;
             --max-mb)   MAX_FILE_SIZE_MB=$2;;
@@ -114,7 +117,7 @@ entrypoint()
     mkdir -p "$DIR_CACHE"
 
     local URLs url
-    URLs=$(cat "$INPUT" | sed 's/#.*//; /^[[:space:]]*$/d')
+    URLs=$(cat "$INPUT" | sed 's/#.*//; /^[[:space:]]*$/d' | { while read -r; do echo "${REPLY//\$ADDR/$ADDR}"; done } )
 
     progress_begin "[1/5] Init db"
     DB_init "$DIR_CACHE/db.txt" "%1s %12s %6s %50s %-60s"
