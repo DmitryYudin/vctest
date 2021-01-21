@@ -704,7 +704,7 @@ decode_single_file()
 	local psnrLog=psnr.log
 	local frameLog=frame.log
 	local summaryLog=summary.log
-	local statLog=DecTrace.txt
+	local statLog=TraceDec.txt
 
 	local srcRes= srcFps= srcNumFr=
 	
@@ -775,7 +775,7 @@ parse_single_file()
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
 	local summaryLog=summary.log
-	local statLog=DecTrace.txt
+	local statLog=TraceDec.txt
 
 	local cpuAvg=- extFPS=- intFPS= framestat=
 	if [[ -f "$cpuLog" ]]; then # may not exist
