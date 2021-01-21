@@ -28,7 +28,7 @@ readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 readonly dirTmp=$(tempdir)/vctest/$timestamp
 readonly statExe=$dirScript/../'bin/TAppDecoder.exe'
-readonly parsePy=$dirScript/../'core/parser.py'
+readonly parsePy=$dirScript/../'core/parseTrace.py'
 
 usage()
 {
@@ -704,7 +704,7 @@ decode_single_file()
 	local psnrLog=psnr.log
 	local frameLog=frame.log
 	local summaryLog=summary.log
-	local statLog=stat.log
+	local statLog=DecTrace.txt
 
 	local srcRes= srcFps= srcNumFr=
 	
@@ -714,7 +714,7 @@ decode_single_file()
 
 	$ffmpegExe -y -loglevel error -i "$dst" "$recon"
 	$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $infoLog
-	$statExe -b "$dst" > $statLog
+	$statExe -b "$dst" > /dev/null
 	
 	local sizeInBytes= kbps=
 	sizeInBytes=$(stat -c %s "$dst")
@@ -775,7 +775,7 @@ parse_single_file()
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
 	local summaryLog=summary.log
-	local statLog=stat.log
+	local statLog=DecTrace.txt
 
 	local cpuAvg=- extFPS=- intFPS= framestat=
 	if [[ -f "$cpuLog" ]]; then # may not exist
