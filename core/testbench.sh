@@ -465,7 +465,7 @@ output_header()
 	printf 	-v str "%s %6s %6s %6s %6s"         "$str" gPSNR psnr-I psnr-P gSSIM
 	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
 	printf 	-v str "%s %9s %2s %-16s %-8s %s" 	"$str" PRESET TH CMD-HASH ENC-HASH SRC
-	printf 	-v str "%s %s %s %s" 	"$str" numIntra numInter numSkip
+	printf 	-v str "%s %s %s %s" 	"$str" numIntra% numInter% numSkip%
 
 #	print_console "$str\n"
 
@@ -489,9 +489,9 @@ output_legend()
 		QP         - QP value for fixed QP mode
 		BR         - Target bitrate.
 		TH         - Threads number.
-		numIntra   - Number of INTRA blocks in P/B slices
-		numInter   - Number of INTER blocks in P/B slices
-		numSkip    - Number of skip blocks (skipFlag == 1) in P/B slices
+		numIntra   - Ratio of INTRA blocks in P/B slices
+		numInter   - Ratio of INTER blocks in P/B slices
+		numSkip    - Ratio of skip blocks (skipFlag == 1) in P/B slices
 	EOT
 	)
 
@@ -540,7 +540,7 @@ output_report()
 	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f" "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
 	printf 	-v str "%s %-11s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
 	printf 	-v str "%s %9s %2s %-16s %-8s %s" 	"$str" "$PRESET" "$TH" "$HASH" "$ENC" "$SRC"
-	printf 	-v str "%s %3d %3d %3d" 	"$str" "$numIntra" "$numInter" "$numSkip"
+	printf 	-v str "%s %2.2f %2.2f %2.2f" 	"$str" "$numIntra" "$numInter" "$numSkip"
 
 #	print_console "$str\n"
 	echo "$str" >> $REPORT

@@ -70,5 +70,16 @@ with open(sys.argv[1], 'r+') as f:
                         else:
                             raise Exception("parse error: predmode value expected but not found  ")
 
-    print("numIntra:%d numInter:%d numSkip:%d" % (numIntra, numInter, numSkip))
+    totalBlockNum = numInter + numIntra
+
+    if totalBlockNum == 0:
+        numIntra = 0.
+        numInter = 0.
+        numSkip = 0.
+    else:
+        numInter = 100 * numInter/totalBlockNum
+        numSkip  = 100 * numSkip/totalBlockNum
+        numIntra = 100 * numIntra/totalBlockNum
+
+    print("numIntra:%2.2f numInter:%2.2f numSkip:%2.2f" % (numIntra, numInter, numSkip))
 
