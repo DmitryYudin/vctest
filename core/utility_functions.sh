@@ -72,12 +72,17 @@ dict_checkKey()
 	[[ "$val" == "$dict" ]] && return 1
 	return 0
 }
-dict_getValue()
+dict_getValue() # dict key default format
 {
 	local dict=$1 key=$2; val=${dict#*$key:};
-	[[ "$val" == "$dict" ]] && error_exit "can't find key=$key"
-	val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
-	val=${val%%[ $'\t']*} # Cut everything after left most whitespace
+	if [[ "$val" == "$dict" ]]; then
+		val=${3:-}
+		[[ -z "$val" ]] && error_exit "can't find key=$key"
+	else
+		val=${val#"${val%%[! $'\t']*}"} # Remove leading whitespaces 
+		val=${val%%[ $'\t']*} # Cut everything after left most whitespace
+    	[[ -n "${4:-}" && "$val" != '-' ]] && printf -v val "$4" "$val"
+	fi
 	REPLY=$val
 }
 dict_getValueEOL()
