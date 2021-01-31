@@ -468,9 +468,8 @@ output_header()
 	printf 	-v str "%s %3s %7s %6s %4s"         "$str" '#I' avg-I avg-P peak 
 	printf 	-v str "%s %6s %6s %6s %6s"         "$str" gPSNR psnr-I psnr-P gSSIM
 	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
-	printf 	-v str "%s %9s %2s %-16s %-8s %s" 	"$str" PRESET TH CMD-HASH ENC-HASH SRC
-
-#	print_console "$str\n"
+	printf 	-v str "%s %9s %2s %-16s %-8s"      "$str" PRESET TH CMD-HASH ENC-HASH
+	printf 	-v str "%s %s"                      "$str" SRC
 
 	echo "$str" >> "$REPORT"
 }
@@ -506,38 +505,38 @@ output_report()
 	local extFPS= intFPS= cpu= kbps= numI= avgI= avgP= peak= gPSNR= psnrI= psnrP= gSSIM=
 	local codecId= srcRes= srcFps= numFr= QP= BR= PRESET= TH= SRC= HASH= ENC=
 
-	dict_getValue "$dict" extFPS  ; extFPS=$REPLY
-	dict_getValue "$dict" intFPS  ; intFPS=$REPLY
-	dict_getValue "$dict" cpu     ; cpu=$REPLY
-	dict_getValue "$dict" kbps    ; kbps=$REPLY
-	dict_getValue "$dict" numI    ; numI=$REPLY
-	dict_getValue "$dict" avgI    ; avgI=$REPLY
-	dict_getValue "$dict" avgP    ; avgP=$REPLY
-	dict_getValue "$dict" peak    ; peak=$REPLY
-	dict_getValue "$dict" gPSNR   ; gPSNR=$REPLY
-	dict_getValue "$dict" psnrI   ; psnrI=$REPLY
-	dict_getValue "$dict" psnrP   ; psnrP=$REPLY
-	dict_getValue "$dict" gSSIM   ; gSSIM=$REPLY
-	dict_getValue "$dict" codecId ; codecId=$REPLY
-	dict_getValue "$dict" srcRes  ; srcRes=$REPLY
-	dict_getValue "$dict" srcFps  ; srcFps=$REPLY
-	dict_getValue "$dict" srcNumFr; srcNumFr=$REPLY
-	dict_getValue "$dict" QP      ; QP=$REPLY
-	dict_getValue "$dict" BR      ; BR=$REPLY
-	dict_getValue "$dict" PRESET  ; PRESET=$REPLY
-	dict_getValue "$dict" TH      ; TH=$REPLY
-	dict_getValue "$dict" SRC     ; SRC=$REPLY
-	dict_getValue "$dict" encCmdHash; HASH=$REPLY; HASH=${HASH::16}
-	dict_getValue "$dict" encExeHash; ENC=$REPLY ; ENC=${ENC##*_}
+	dict_getValue "$dict" extFPS                ; extFPS=$REPLY
+	dict_getValue "$dict" intFPS     '' %8.3f   ; intFPS=$REPLY
+	dict_getValue "$dict" cpu                   ; cpu=$REPLY
+	dict_getValue "$dict" kbps       '' %5.0f   ; kbps=$REPLY
+	dict_getValue "$dict" numI       -  %3d     ; numI=$REPLY
+	dict_getValue "$dict" avgI       -  %7.0f   ; avgI=$REPLY
+	dict_getValue "$dict" avgP       -  %6.0f   ; avgP=$REPLY
+	dict_getValue "$dict" peak       -  %4.1f   ; peak=$REPLY
+	dict_getValue "$dict" gPSNR      '' %6.2f   ; gPSNR=$REPLY
+	dict_getValue "$dict" psnrI      -  %6.2f   ; psnrI=$REPLY
+	dict_getValue "$dict" psnrP      -  %6.2f   ; psnrP=$REPLY
+	dict_getValue "$dict" gSSIM      '' %6.3f   ; gSSIM=$REPLY
+	dict_getValue "$dict" codecId               ; codecId=$REPLY
+	dict_getValue "$dict" srcRes                ; srcRes=$REPLY
+	dict_getValue "$dict" srcFps                ; srcFps=$REPLY
+	dict_getValue "$dict" srcNumFr              ; srcNumFr=$REPLY
+	dict_getValue "$dict" QP                    ; QP=$REPLY
+	dict_getValue "$dict" BR                    ; BR=$REPLY
+	dict_getValue "$dict" PRESET                ; PRESET=$REPLY
+	dict_getValue "$dict" TH                    ; TH=$REPLY
+	dict_getValue "$dict" SRC                   ; SRC=$REPLY
+	dict_getValue "$dict" encCmdHash            ; HASH=$REPLY; HASH=${HASH::16}
+	dict_getValue "$dict" encExeHash            ; ENC=$REPLY ; ENC=${ENC##*_}
 
 	local str=
-	printf 	-v str    "%6s %8.3f %5s %5.0f"            "$extFPS" "$intFPS" "$cpu" "$kbps"
-	printf 	-v str "%s %3d %7.0f %6.0f %4.1f"   "$str" "$numI" "$avgI" "$avgP" "$peak"
-	printf 	-v str "%s %6.2f %6.2f %6.2f %6.3f" "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
-	printf 	-v str "%s %-11s %11s %5d %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
-	printf 	-v str "%s %9s %2s %-16s %-8s %s" 	"$str" "$PRESET" "$TH" "$HASH" "$ENC" "$SRC"
+	printf 	-v str    "%6s %8s %5s %5s"                "$extFPS" "$intFPS" "$cpu" "$kbps"
+	printf 	-v str "%s %3s %7s %6s %4s"         "$str" "$numI" "$avgI" "$avgP" "$peak"
+	printf 	-v str "%s %6s %6s %6s %6s"         "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
+	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
+	printf 	-v str "%s %9s %2s %-16s %-8s"      "$str" "$PRESET" "$TH" "$HASH" "$ENC"
+	printf 	-v str "%s %s"                      "$str" "$SRC"
 
-#	print_console "$str\n"
 	echo "$str" >> $REPORT
 }
 
@@ -769,7 +768,7 @@ parse_single_file()
 	local fpsLog=fps.log
 	local summaryLog=summary.log
 
-	local cpuAvg=- extFPS=- intFPS= framestat=
+	local cpuAvg=- extFPS=- intFPS= kbps=- framestat=
 	if [[ -f "$cpuLog" ]]; then # may not exist
 		cpuAvg=$(parse_cpuLog "$cpuLog")
 		printf -v cpuAvg "%.0f" "$cpuAvg"
@@ -778,9 +777,10 @@ parse_single_file()
         { read -r extFPS; } < "$fpsLog"
 	fi
 	intFPS=$(parse_stdoutLog "$codecId" "$stdoutLog")
-	framestat=$(parse_framestat "$kbpsLog" "$summaryLog")
+    { read -r kbps; } < "$kbpsLog"
+	[[ -f "$summaryLog" ]] && framestat=$(parse_framestat "$summaryLog")
 
-	local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg $framestat"
+	local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg kbps:$kbps $framestat"
 	echo "$dict" > report.kw
 
 	date "+%Y.%m.%d-%H.%M.%S" > parsed.ts
@@ -790,11 +790,8 @@ parse_single_file()
 
 parse_framestat()
 {
-	local kbpsLog=$1; shift
 	local summaryLog=$1; shift
-
-	local kbps= summary=
-    { read -r kbps; } < "$kbpsLog"
+	local summary=
 
     local script='
         function get_value(name,           a, b) {
@@ -807,6 +804,9 @@ parse_framestat()
 	    }
 	    function x265_ssim2dB(ssim) {
 			return (1 - ssim) <= 0.0000000001 ? 100 : -10*log(1 - ssim)/log(10)
+	    }
+	    function setDefault(x) {
+			return length(x) == 0 ? "-" : x
 	    }
 
         BEGIN {
@@ -843,6 +843,16 @@ parse_framestat()
             peak = avgP > 0 ? avgI/avgP : 0;
 
             gSSIM_db=x265_ssim2dB(gSSIM)
+
+            numI = setDefault(numI)
+            numP = setDefault(numP)
+            sizeI = setDefault(sizeI)
+            sizeP = setDefault(sizeP)
+            avgI = setDefault(avgI)
+            avgP = setDefault(avgP)
+            ssimI = setDefault(ssimI)
+            ssimP = setDefault(ssimP)
+
             print "numI:"numI" numP:"numP" sizeI:"sizeI" sizeP:"sizeP\
                  " avgI:"avgI" avgP:"avgP" peak:"peak\
                  " psnrI:"psnrI" psnrP:"psnrP" gPSNR:"gPSNR\
@@ -852,7 +862,7 @@ parse_framestat()
     '
     summary=$(awk "$script" "$summaryLog")
 
-    echo "kbps:$kbps $summary"
+    echo "$summary"
 }
 
 parse_cpuLog()
