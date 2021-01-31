@@ -85,6 +85,19 @@ codec_default_preset()
 	esac
 	REPLY=$preset
 }
+codec_fmt()
+{
+    local codecId=$1; shift
+	local fmt=
+	case $codecId in
+		ashevc|x265|kvazaar|kingsoft|ks|intel_*|h265demo*) fmt=h265;;
+		h264demo|h264aspt) fmt=h264;;
+        vp8) fmt=vp8;;
+        vp9) fmt=vp9;;
+        *) error_exit "unknown encoder: $codecId";;
+	esac
+	REPLY=$fmt
+}
 codec_exe()
 {
 	local codecId=$1; shift
