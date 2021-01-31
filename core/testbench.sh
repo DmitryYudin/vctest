@@ -315,18 +315,18 @@ prepare_optionsFile()
 		[[ $qp == '-' ]]     || args="$args --qp $qp"
 		[[ $preset == '-' ]] || args="$args --preset $preset"
 
-		local encExe= encExeHash= encCmdArgs= encCmdHash=
+		local encExe= encFmt= encExeHash= encCmdArgs= encCmdHash=
 		codec_exe $codecId $target; encExe=$REPLY
+		codec_fmt $codecId; encFmt=$REPLY
 		codec_hash $codecId $target; encExeHash=$REPLY
 		codec_cmdArgs $codecId $args; encCmdArgs=$REPLY
 
 		local SRC=${src//\\/}; SRC=${SRC##*[/\\]} # basename only
-		local ext=h265; [[ $codecId == h264demo ]] && ext=h264
-		local dst="$SRC.$ext"
+		local dst="$SRC.$encFmt"
 
 		local info="src:$src codecId:$codecId srcRes:$srcRes srcFps:$srcFps srcNumFr:$srcNumFr"
 		info="$info QP:$qp BR:$bitrate PRESET:$preset TH:$THREADS SRC:$SRC dst:$dst"
-		info="$info encExe:$encExe encExeHash:$encExeHash encCmdArgs:$encCmdArgs"
+		info="$info encExe:$encExe encFmt:$encFmt encExeHash:$encExeHash encCmdArgs:$encCmdArgs"
 		printf '%s\n' "$info"
 	done
 	done
@@ -692,59 +692,60 @@ decode_single_file()
 	dict_getValue "$info" src; src=$REPLY
 	dict_getValue "$info" dst; dst=$REPLY
 
-	local recon=$(basename "$dst").yuv
-	local kbpsLog=kbps.log
-	local infoLog=info.log
-	local ssimLog=ssim.log
-	local psnrLog=psnr.log
-	local frameLog=frame.log
-	local summaryLog=summary.log
-
-	local srcRes= srcFps= srcNumFr=
+	local encFmt= srcRes= srcFps= srcNumFr=
+	dict_getValue "$info" encFmt; encFmt=$REPLY
 	dict_getValue "$info" srcRes; srcRes=$REPLY
 	dict_getValue "$info" srcFps; srcFps=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
-	$ffmpegExe -y -loglevel error -i "$dst" "$recon"
-	$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $infoLog
+	local recon=$(basename "$dst").yuv
+	local kbpsLog=kbps.log
+	local summaryLog=summary.log
 
 	local sizeInBytes= kbps=
 	sizeInBytes=$(stat -c %s "$dst")
 	kbps=$(awk "BEGIN { print 8 * $sizeInBytes / ($srcNumFr/$srcFps) / 1000 }")
 	echo "$kbps" > $kbpsLog
 
+	local decoderId=
+	case $encFmt in
+		h264|h265|vp8|vp9) decoderId=ffmpeg;;
+		*) error_exit "can't find decoder for '$encFmt' format";;
+	esac
+
+	local frameLog=frame.log
+	if [[ "$decoderId" == ffmpeg ]]; then
+		$ffmpegExe -y -loglevel error -i "$dst" "$recon"
+
+		local ffprobeLog=ffprobe.log
+		$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $ffprobeLog		
+		{ # dump one liners for each frame from ffprobe output
+			local type= size= cnt=0
+			while read -r; do
+				case $REPLY in
+					'[FRAME]')  type=; size=; cnt=$(( cnt + 1 ));;
+					'[/FRAME]') echo "n:$cnt type:$type size:$size";;
+					pict_type=I) type=I;;
+					pict_type=P) type=P;;
+					pkt_size=*) size=${REPLY#pkt_size=};;
+				esac
+			done < $ffprobeLog
+		} > $frameLog
+	fi
+
+	local ssimLog=ssim.log
+	local psnrLog=psnr.log
 	# ffmpeg does not accept filename in C:/... format as a filter option
 	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i "$DIR_VEC/$src" -s $srcRes -i "$recon" -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
 		echo "$log" && return 1
 	fi
+
+	# merge one-liners
+	local logsToMerge="$psnrLog $ssimLog"
+	[[ -f $frameLog ]] && logsToMerge="$frameLog $logsToMerge"
+	paste $logsToMerge | tr -d $'\r' > $summaryLog
+
 	rm -f "$recon"
-
-	local numI=0 numP=0 sizeI=0 sizeP=0
-	{
-		local type= size= cnt=0
-		while read -r; do
-			case $REPLY in
-				'[FRAME]')
-					type=
-					size=
-					cnt=$(( cnt + 1 ))
-				;;
-				'[/FRAME]')
-					[[ $type == I ]] && numI=$(( numI + 1 )) && sizeI=$(( sizeI + size ))
-					[[ $type == P ]] && numP=$(( numP + 1 )) && sizeP=$(( sizeP + size ))
-					echo "n:$cnt type:$type size:$size"
-				;;
-			esac
-			case $REPLY in
-				pict_type=I) type=I;;
-				pict_type=P) type=P;;
-			esac
-			case $REPLY in pkt_size=*) size=${REPLY#pkt_size=}; esac
-			# echo $v
-		done < $infoLog
-	} > $frameLog
-
-	paste "$frameLog" "$psnrLog" "$ssimLog" | tr -d $'\r' > $summaryLog
 
 	date "+%Y.%m.%d-%H.%M.%S" > decoded.ts
 
