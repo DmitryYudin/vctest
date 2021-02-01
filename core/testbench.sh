@@ -23,6 +23,7 @@ VECTORS="
 DIR_OUT=$(ospath "$dirScript"/../out)
 DIR_VEC=$(ospath "$dirScript"/../vectors)
 NCPU=0
+TRACE_HM=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
@@ -71,6 +72,7 @@ usage()
 	       --force       Invalidate results cache
 	       --decode      Force decode stage
 	       --parse       Force parse stage
+	       --trace_hm    Collect H.265 stream info from HW decoder trace
 	EOF
 }
 
@@ -96,6 +98,7 @@ entrypoint()
                --force)     force=1; nargs=1;;
                --decode)    decode=1; nargs=1;;
                --parse)     parse=1; nargs=1;;
+               --trace_hm)  TRACE_HM=1; nargs=1;;
 			   --)			cmd_endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
@@ -173,6 +176,13 @@ entrypoint()
 
 			encodeList="$encodeList $outputDirRel"
 		fi
+        if [[ "$TRACE_HM" == 1 ]]; then
+            local encFmt
+        	dict_getValue "$info" encFmt; encFmt=$REPLY
+
+   			local statLog=TraceDec.txt
+            [[ "$encFmt" == h265 && ! -f "$outputDir/$statLog" ]] && rm -f "$outputDir/decoded.ts"
+        fi
 		[[ -n $decode ]] && rm -f $outputDir/decoded.ts $outputDir/parsed.ts
 		if [[ ! -f "$outputDir/decoded.ts" ]]; then
 			decodeList="$decodeList $outputDirRel"
@@ -763,8 +773,10 @@ decode_single_file()
 
 	case $encFmt in
 		h265)
-			local statLog=TraceDec.txt
-			$statExe -b "$dst" > /dev/null
+            if [[ "$TRACE_HM" == 1 ]]; then
+    			local statLog=TraceDec.txt
+	    		$statExe -b "$dst" > /dev/null
+            fi
 		;;
 	esac
 
