@@ -11,6 +11,8 @@ https://github.com/ultravideo/kvazaar/releases/download/v1.3.0/Win64-Release.zip
 # https://builds.x265.eu/x265-64bit-8bit-latest.exe
 # http://msystem.waw.pl/x265/x265-3.4+1-7b12030-stable_vs2019-AVX2.7z
 http://msystem.waw.pl/x265/x265-3.4+12-g9103-stable_vs2019-AVX2.7z
+https://github.com/DmitryYudin/vvenc/releases/download/b0.2.1.0/vvenc.7z
+https://github.com/DmitryYudin/vvdec/releases/download/b0.2.1.0/vvdec.7z
 
 # ARC
 https://github.com/DmitryYudin/encoders_pk_script/raw/master/bin/ASHEVCEnc.dll
