@@ -235,6 +235,7 @@ is_binary_package()
         x265-64bit*) : ;;
         x265-3*) : ;;
         ASHEVCEnc.dll|VMFPlatform.dll|cli_ashevc.exe|ashevc_example.cfg) : ;;
+        vvenc*|vvdec*) : ;;
         *) return 1 ;;
     esac
     return 0
@@ -431,6 +432,14 @@ install_from_cache()
                 dst="$DIR_BIN/windows/x265"
                 $SevenZipExe x -y "$src" -o"$dst" -i"!x265-8b.exe" >/dev/null
                 mv "$dst/x265-8b.exe" "$dst/x265.exe"
+            ;;
+            vvenc*)
+                dst="$DIR_BIN/windows/vvenc"
+                $SevenZipExe x -y "$src" -o"$dst" -i"!vvencapp.exe" >/dev/null
+            ;;
+            vvdec*)
+                dst=$DIR_BIN
+                $SevenZipExe x -y "$src" -o"$dst" >/dev/null
             ;;
             ASHEVCEnc.dll|VMFPlatform.dll|cli_ashevc.exe|ashevc_example.cfg)
                 dst="$DIR_BIN/windows/ashevc"

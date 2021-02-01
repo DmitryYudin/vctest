@@ -29,6 +29,9 @@ windows_h264aspt=windows/h264_aspt/h264enc.exe
 windows_vpx=windows/vpx/vpxenc.exe
 windows_vp8=$windows_vpx
 windows_vp9=$windows_vpx
+windows_vvenc=windows/vvenc/vvencapp.exe
+windows_vvenc2=windows/vvenc2/vvencapp.exe
+windows_vvencff=windows/vvencff/vvencFFapp.exe
 
 android_kingsoft=android/kingsoft/appencoder
 android_ks=android/ks/ks_encoder
@@ -60,6 +63,7 @@ codec_get_knownId()
     REPLY="$REPLY h264demo"
     REPLY="$REPLY h264aspt"
     REPLY="$REPLY vp8 vp9"
+    REPLY="$REPLY vvenc vvenc2 vvencff"
     REPLY=${REPLY# }
 }
 
@@ -81,6 +85,7 @@ codec_default_preset()
         h264aspt)	preset=3;; # 0 - 10
         vp8)	    preset=5;; # 0 - 16
         vp9)	    preset=9;; # 0 -  9
+        vvenc*)     preset=faster;;
 		*) error_exit "unknown encoder: $codecId";;
 	esac
 	REPLY=$preset
@@ -94,6 +99,7 @@ codec_fmt()
 		h264demo|h264aspt) fmt=h264;;
         vp8) fmt=vp8;;
         vp9) fmt=vp9;;
+        vvenc*) fmt=h266;;
         *) error_exit "unknown encoder: $codecId";;
 	esac
 	REPLY=$fmt
@@ -772,4 +778,87 @@ cmd_vp9()
 	args="$args --codec=vp9"
 	args="$args --tile-columns=0"
     REPLY=$args
+}
+
+exe_vvenc() { REPLY=;
+			  [[ $1 == windows ]] && REPLY=$windows_vvenc;
+              [[ $1 == linux   ]] && REPLY=$linux_intel_vvenc;
+			  return 0;
+}
+src_vvenc() { REPLY="-i $1"; }
+dst_vvenc() { REPLY="-o $1"; }
+cmd_vvenc()
+{
+	local args= threads=1 res=
+	while [ "$#" -gt 0 ]; do
+		case $1 in
+			-i|--input) 	args="$args -i $2";;
+			-o|--output) 	args="$args -o $2";;
+			   --res) 		args="$args --size $2";;
+			   --fps) 		args="$args --framerate $2";;
+			   --preset) 	args="$args --preset $2";;
+			   --qp)     	args="$args --qp $2";;
+			   --bitrate)   args="$args --bitrate $(( $2 * 1000 ))";; # kbit -> bit
+			   --threads)   args="$args --threads $2";;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+    args="$args --format yuv420"
+    args="$args --gopsize 32"
+    args="$args --passes 1"
+    args="$args --profile main10"
+    args="$args --tier main"
+    args="$args --verbosity 1"
+    args="$args --internal-bitdepth 8"
+
+	REPLY=$args
+}
+
+exe_vvenc2() { REPLY=;
+			  [[ $1 == windows ]] && REPLY=$windows_vvenc2;
+			  return 0;
+}
+src_vvenc2() { src_vvenc "$@"; }
+dst_vvenc2() { dst_vvenc "$@"; }
+cmd_vvenc2() { cmd_vvenc "$@"; }
+
+exe_vvencff() { REPLY=;
+			    [[ $1 == windows ]] && REPLY=$windows_vvencff;
+			    return 0;
+}
+src_vvencff() { REPLY="-i $1"; }
+dst_vvencff() { REPLY="-b $1"; }
+cmd_vvencff()
+{
+	local args= threads=1 res=
+	while [ "$#" -gt 0 ]; do
+		case $1 in
+			-i|--input) 	args="$args -i $2";;
+			-o|--output) 	args="$args -b $2";;
+			   --res) 		args="$args --Size=$2";;
+			   --fps) 		args="$args --FrameRate=$2";;
+			   --preset) 	args="$args --preset=$2";;
+			   --qp)     	args="$args --QP=$2";;
+			   --bitrate)   args="$args --TargetBitrate=$(( $2 * 1000 ))";; # kbit -> bit
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+    if [[ $threads == 1 ]]; then
+        args="$args --Threads=$threads --NumWppThreads=0"
+    else
+        args="$args --Threads=$threads --NumWppThreads=$threads --WppBitEqual=1"
+    fi
+    args="$args --FrameParallel=0 --NumFppThreads=0"
+    args="$args --InputChromaFormat=420"
+    args="$args --GOPSize=32"
+    args="$args --NumPasses=1"
+    args="$args --Profile=main_10"
+    args="$args --Tier=main"
+    args="$args --Verbosity=3"
+    args="$args --InternalBitDepth=8"
+
+	REPLY=$args
 }
