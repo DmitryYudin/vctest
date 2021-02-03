@@ -4,7 +4,7 @@
 #
 
 : ${__CURL_OPT="--location -k --silent --show-error"}
-URL_BACKEND=${1-ps}
+URL_BACKEND=${1-curl}
 URL_TIMEOUT_SEC=
 
 if [[ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]]; then
@@ -34,14 +34,18 @@ usage()
 	    script --[curl|ps] --[head|info|get|test] [URL|file] [output]
 
 	Options:
-	    --help    - Print this help
-	    --curl|ps - Use Curl (default) or Powershell
-	    --head    - Print headers. HEADERs only request.
-	    --force   - Print response NORMAL request.
-	    --info    - Print URL info (default)
-	    --get     - Download to 'output'
-	    --test    - Same as '--info' but for predefined list of URLs
-	                or URL read from the file, one url per file
+	    --help         - Print this help
+	    --curl|ps1|ps2 - Use Curl (default) or Powershell
+	                         ps1 - use WebRequest API
+	                         ps2 - use WebClient API
+	                     'ps' works well with corporate proxy, try both
+	                     variants to check which one works best in your case.
+	    --head         - Print headers. HEADERs only request.
+	    --force        - Print response NORMAL request.
+	    --info         - Print URL info (default)
+	    --get          - Download to 'output'
+	    --test         - Same as '--info' but for predefined list of URLs
+	                     or URL read from the file, one url per file
 	Examples:
 	    url.sh https://github.com/git-for-windows/git-sdk-32/tarball/master
 	    url.sh --get http://releases.llvm.org/9.0.0/LLVM-9.0.0-win32.exe out.bin
@@ -60,7 +64,8 @@ entrypoint()
 		case "$arg" in
 			-h|--help) usage; return;;
 			--curl) URL_BACKEND=curl; backend=true;;
-			--ps) URL_BACKEND=ps; backend=true;;
+			--ps1)  URL_BACKEND=ps1; backend=true;;
+            --ps2)  URL_BACKEND=ps2; backend=true;;
 			--head) task=1;;
 			--force) task=2;;
 			--info) task=3;;
@@ -148,7 +153,8 @@ URL_set_backend()
     local backend=$1; shift
     case $backend in
         curl) URL_BACKEND=curl;;
-        ps)   URL_BACKEND=ps;;
+        ps1)  URL_BACKEND=ps1;;
+        ps2)  URL_BACKEND=ps2;;
         *)    echo "error: unknown backend '$backend'" 1>&2 && return 1
     esac    
 }
@@ -259,20 +265,20 @@ URL_info()
 ####################################
 URL_headers()
 {
-	if [[ "$URL_BACKEND" == ps ]]; then
-		URL_headers_ps_WebRequest "$@"
-	else
-		URL_headers_curl "$@"
+	if [[ "$URL_BACKEND" == curl ]]; then
+        URL_headers_curl "$@"
+    else
+        URL_headers_ps_WebRequest "$@"
 	fi
 }
 URL_headers_FORCE()
 {
-	if [[ "$URL_BACKEND" == ps ]]; then
-		URL_headers_ps_WebClient "$@"
-	else
+	if [[ "$URL_BACKEND" == curl ]]; then
 		if ! URL_headers_curl "$@"; then
     		URL_headers_curl_FORCE "$@"
         fi
+	else
+		URL_headers_ps_WebClient "$@"
 	fi
 }
 URL_headers_curl()	# only headers
@@ -382,10 +388,10 @@ URL_headers_ps_WebClient()
 ####################################
 URL_download()
 {
-	if [[ "$URL_BACKEND" == ps ]]; then
-		URL_download_ps "$@"
-	else
+	if [[ "$URL_BACKEND" == curl ]]; then
 		URL_download_curl "$@"
+	else
+		URL_download_ps "$@"
 	fi
 }
 
@@ -424,7 +430,7 @@ URL_download_ps()
 		SCRIPT
 	)
 
-	local script=$(cat <<-'SCRIPT'
+	local script_WebRequest=$(cat <<-'SCRIPT'
 		{   # This does wrong things on double redirect: https://sourceforge.net/projects/sevenzip/files/7-Zip/19.00/7z1900.msi
 			#
 			# TODO: check proxy
@@ -452,7 +458,7 @@ URL_download_ps()
 	# this hangs user script but known work with proxy well
 	# 40Mb of 51Mb downloaded : http://repo.msys2.org/distrib/msys2-x86_64-latest.tar.xz
 	# with an exit code of '0' - do not know what to do !!!
-	local script2=$(cat <<-'SCRIPT'
+	local script_WebClient=$(cat <<-'SCRIPT'
 		{
 	    	Param([Uri] $url, $dst)
             try {
@@ -472,8 +478,11 @@ URL_download_ps()
 		__execute_script_ps front "$script_show_proxy"
 		export SHOW_PROXY=1
 	fi
-	#__execute_script_ps front "$script" "$url" "$dst"
-	__execute_script_ps back "$script2" "$url" "$dst"
+    if [[ "$URL_BACKEND" == ps1 ]]; then
+        __execute_script_ps front "$script_WebRequest" "$url" "$dst"
+    else
+        __execute_script_ps back "$script_WebClient" "$url" "$dst"
+    fi
 }
 
 if [[ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]]; then

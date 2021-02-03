@@ -46,7 +46,7 @@ MAX_FRAME_SIZE=1280x720
 
 # Sometimes, power-shell does not return error status as expected,
 # but it is more NTLM proxy friendly than curl.
-USE_POWERSHELL=
+DONWLOAD_BACKEND=curl
 
 usage()
 {
@@ -62,11 +62,12 @@ usage()
 	    --max-res         Video resolution limit in 'WxH' format (default: $MAX_FRAME_SIZE)
 	    --max-mb          File size limit in Mb (default: $MAX_FILE_SIZE_MB)
 	    --curl            Use 'curl' backend
-	    --ps              Use 'powershell' backend
+	    --ps1             Use 'powershell' as WebRequest
+	    --ps2             Use 'powershell' as WebClient
 	    --map             Print content of the vectors directory grouped by video resolution
 	    --stat            Print video vectors statistics
 
-    Default backend is '$( [[ -n $USE_POWERSHELL ]] && echo ps || echo curl )'
+    Default backend option is '$DONWLOAD_BACKEND'
 
 	Examples:
 	    $(basename $0) -i download.txt
@@ -90,8 +91,9 @@ entrypoint()
             -d|--dir)   DIR_VEC=$dirScript/../vectors/$2;;
             --max-res*) MAX_FRAME_SIZE=$2;;
             --max-mb)   MAX_FILE_SIZE_MB=$2;;
-            --curl)     USE_POWERSHELL=; nargs=1;;
-            --ps)       USE_POWERSHELL=1; nargs=1;;
+            --curl)     DONWLOAD_BACKEND=curl; nargs=1;;
+            --ps1)      DONWLOAD_BACKEND=ps1; nargs=1;;
+            --ps2)		DONWLOAD_BACKEND=ps2; nargs=1;;
             --map)      do_map=1; nargs=1;;
             --stat)      do_stat=1; nargs=1;;
             *) error_exit "unrecognized option '$1'"
@@ -102,7 +104,6 @@ entrypoint()
 
     DIR_VEC=$(ospath "$DIR_VEC")
     [[ -n $do_map || -n $do_stat ]] && { map_vectors "$do_map" "$do_stat"; return; }
-    [[ -n $USE_POWERSHELL ]] && DONWLOAD_BACKEND=ps || DONWLOAD_BACKEND=curl
 
     print_console "Max resolution:   $MAX_FRAME_SIZE\n"
     print_console "Max size (Mb):    $MAX_FILE_SIZE_MB\n"
