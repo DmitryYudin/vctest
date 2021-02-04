@@ -77,12 +77,13 @@ check_root()
 menu_main()
 {
 	echo "[ Main menu ]"
-	echo "  1. Print CPU info"
-	echo "  2. Print CPU group info"
+	echo "  1. CPU info"
+	echo "  2. CPU group info"
 	echo "  3. Enable CPU"
 	echo "  4. Disable CPU"
-	echo "  5. Disable CPU group"
-	echo "  6. Set max frequency for the CPU group"
+#	echo "  5. Enable CPU group" # can't enable since group index is not available
+	echo "  6. Disable CPU group"  # 
+	echo "  7. Set CPU group frequency"
 
 	echo "Choose what to do next, or press 'q' to quit:"
 	while read -s; do
@@ -91,10 +92,11 @@ menu_main()
 			q) return;;
 			1) task=menu_cpus_info;;
 			2) task=menu_group_info;;
-			3) task=menu_cpu_enable;;
-			4) task=menu_cpu_disable;;
-			5) task=menu_group_disable;;
-			6) task=menu_group_maxfreq;;
+			3) task="menu_cpu_control 1";;
+			4) task="menu_cpu_control 0";;
+			5) task="menu_group_control 1";;
+			6) task="menu_group_control 0";;
+			7) task=menu_group_maxfreq;;
 			*) continue;
 		esac
 
@@ -127,21 +129,25 @@ menu_group_info()
 	REPLY=c
 }
 
-menu_cpu_enable()
+menu_cpu_control()
 {
-	echo "[ CPU enable ]"
+	local wantEnable=$1; shift
+	[[ $wantEnable == 1 ]] && echo "[ CPU enable ]" || echo "[ CPU disable ]"
+
+	local requestState=
+	[[ $wantEnable == 1 ]] && requestState=0 || requestState=1
 
 	local cpu_list=
-	build_cpu_list 0; cpu_list=$REPLY
-	if [[ -z $cpu_list ]]; then
+	build_cpu_list $requestState; cpu_list=$REPLY
+	if [[ -z $cpu_list && $wantEnable == 1 ]]; then
 		echo "All possible CPUs are already in online state."
 		echo "Press any key to return"
 		read -s
 		return
 	fi
 
-	echo "CPUs offline: $cpu_list"
-	echo "Enter id to set CPU online or press 'c' to cancel:"
+	[[ $wantEnable == 1 ]] && echo "CPUs offline: $cpu_list" || echo "CPUs online: $cpu_list"
+	echo "Enter CPU id or press 'c' to cancel:"
 	while read -s; do
 		[[ $REPLY == c ]] && return
 		local known_cpu=false
@@ -149,60 +155,38 @@ menu_cpu_enable()
 			[[ $REPLY == $cpu ]] && known_cpu=true && break
 		done
 		if $known_cpu; then
-			set_cpu_state $cpu 1 || return 0
+			set_cpu_state $cpu $wantEnable || return 0
 			break
 		fi
 	done
 	echo Success
 }
 
-menu_cpu_disable()
+menu_group_control()
 {
-	echo "[ CPU disable ]"
-
-	local cpu_list=
-	build_cpu_list 1; cpu_list=$REPLY
-
-	echo "CPUs online: $cpu_list"
-	echo "Enter id to set CPU offline or press 'c' to cancel:"
-	while read -s; do
-		[[ $REPLY == c ]] && return
-		local known_cpu=false
-		for cpu in $cpu_list; do
-			[[ $REPLY == $cpu ]] && known_cpu=true && break
-		done
-		if $known_cpu; then
-			set_cpu_state $cpu 0 || return 0
-			break
-		fi
-	done
-	echo Success
-}
-
-menu_group_disable()
-{
-	echo "[ Group disable ]"
+	local wantEnable=$1; shift
+	[[ $wantEnable == 1 ]] && echo "[ Group enable ]" || echo "[ Group disable ]"
 
 	groups_update
 	echo "groups available:"
 	groups_print
 
-	if [[ $GR_NUM == 1 ]]; then
+	if [[ $GR_NUM == 1 && $wantEnable == 0 ]]; then
 		echo "Only one group of CPUs is available, can't disable."
 		echo "Press any key to return"
 		read -s
 		return
 	fi
 
-	echo "Enter group index to disable [0-$((GR_NUM - 1))] or press 'c' to cancel:"
+	echo "Enter group index  [0-$((GR_NUM - 1))] or press 'c' to cancel:"
 	while read -s; do
 		[[ $REPLY == c ]] && return
 		case $REPLY in [0-9]*) [[ 0 -le $REPLY && $REPLY -lt $GR_NUM ]] && break; esac
 	done
 	eval "gr_cpus=\$GR${REPLY}_cpus"
-	echo "Disable CPUs $gr_cpus:"
+	[[ $wantEnable == 1 ]] && echo "Enabling CPUs $gr_cpus:" || echo "Disabling CPUs $gr_cpus:"	
 	for cpu in $gr_cpus; do
-		set_cpu_state $cpu 0 || return 0
+		set_cpu_state $cpu $wantEnable || return 0
 	done
 	echo Success
 
