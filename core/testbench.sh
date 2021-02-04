@@ -24,6 +24,7 @@ DIR_OUT=$(ospath "$dirScript"/../out)
 DIR_VEC=$(ospath "$dirScript"/../vectors)
 NCPU=0
 TRACE_HM=0
+ENABLE_CPU_MONITOR=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
@@ -72,6 +73,7 @@ usage()
 	       --force       Invalidate results cache
 	       --parse       Force parse stage
 	       --trace_hm    Collect H.265 stream info from HW decoder trace
+	       --mon         Monitor CPU load (always enabled for local run)
 	EOF
 }
 
@@ -97,6 +99,7 @@ entrypoint()
                --force)     force=1; nargs=1;;
                --parse)     parse=1; nargs=1;;
                --trace_hm)  TRACE_HM=1; nargs=1;;
+               --mon)       ENABLE_CPU_MONITOR=1; nargs=1;;
 			   --)			cmd_endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
@@ -205,8 +208,10 @@ entrypoint()
 	#
 	progress_begin "[2/5] Encoding..." "$encodeList"
 	if [[ -n "$encodeList" ]]; then
+        local cpumon=
+        [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon="--mon"
 		for outputDirRel in $encodeList; do
-			echo "$self --ncpu $NCPU -- encode_single_file $remote \"$outputDirRel\""
+			echo "$self --ncpu $NCPU $cpumon -- encode_single_file $remote \"$outputDirRel\""
 		done > $testplan
 		execute_plan $testplan $NCPU
 	fi
@@ -655,39 +660,42 @@ encode_single_file()
 
 			# temporary hack, for backward compatibility (remove later)
 			[ $codecId == h265demo ] && echo \"\" > h265demo.cfg
-#
-# Disabled for a while to run encoder in foreground
-#
-#			start_cpu_monitor() {
-#				local worker_pid=\$1; shift
-#				{ while ps -o '%cpu=,cpu=' -p \$worker_pid >> $cpuLog; do sleep .5s; done; } &
-#				PERF_ID=\$!
-#			}
-#			stop_cpu_monitor() {
-#				echo \"waiting CPU monitor with pid=\$PERF_ID to stop\"
-#				kill \$PERF_ID && wait \$PERF_ID || true
-#				echo \"CPU monitor stopped\"
-#			}
-#			consumedSec=\$(date +%s)
-#			$cmd </dev/null 1>$stdoutLog 2>&1 &
-#			pid=\$!
-#			start_cpu_monitor \$pid
-#			error_code=0
-#			wait \$pid || error_code=\$?
-#  			consumedSec=\$(( \$(date +%s) - consumedSec ))
-#			stop_cpu_monitor
+
+			start_cpu_monitor() {
+				local worker_pid=\$1; shift
+				{ while ps -o '%cpu=,cpu=' -p \$worker_pid >> $cpuLog; do sleep .5s; done; } &
+				PERF_ID=\$!
+			}
+			stop_cpu_monitor() {
+				echo \"waiting CPU monitor with pid=\$PERF_ID to stop\"
+				kill \$PERF_ID && wait \$PERF_ID || true
+				echo \"CPU monitor stopped\"
+			}
 
 			consumedSec=\$(date +%s)
-			$cmd </dev/null 1>$stdoutLog 2>&1
+            if [[ $ENABLE_CPU_MONITOR == 1 ]]; then # run decoder in background
+			    $cmd </dev/null 1>$stdoutLog 2>&1 &
+                pid=\$!
+            else
+			    $cmd </dev/null 1>$stdoutLog 2>&1
+            fi
 			error_code=0
+            if [[ $ENABLE_CPU_MONITOR == 1 ]]; then
+			    start_cpu_monitor \$pid
+			    wait \$pid || error_code=\$?
+            fi
   			consumedSec=\$(( \$(date +%s) - consumedSec ))
+            if [[ $ENABLE_CPU_MONITOR == 1 ]]; then
+			    stop_cpu_monitor
+            fi
 
-			[ \$consumedSec != 0 ] && fps=\$(( $srcNumFr/consumedSec ))
 			if [ \$error_code != 0 -o ! -f $dst ]; then
 				echo "" # newline if stderr==tty
 				cat $stdoutLog >&2
 				exit 1
 			fi
+
+			[[ \$consumedSec != 0 ]] && fps=\$(( $srcNumFr/consumedSec )) || fps=0
 			echo "\$fps" > $fpsLog
 		"
 		TARGET_pull $remoteOutputDir/. .
