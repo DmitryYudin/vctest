@@ -28,7 +28,7 @@ usage()
 
 entrypoint()
 {
-    local REF_LOG= TST_LOG= KEY=gPSNR # =gSSIM
+    local REF_LOG= TST_LOG= KEYS=
 
     [[ "$#" -eq 0 ]] && usage && echo "error: arguments required" >&2 && return 1
     while [[ "$#" -gt 0 ]]; do
@@ -42,37 +42,61 @@ entrypoint()
                                 error_exit "too many '$1' options"
                             fi
             ;;
-            -k|--key)       KEY=$2;;
+            -k|--key)       KEYS="$KEYS $2";;
             *) error_exit "unrecognized option '$1'"
         esac
         shift 2
     done
     [[ -z "$REF_LOG" ]] && error_exit "reference log file not set"
     [[ -z "$TST_LOG" ]] && error_exit "under test log file not set"
+    [[ -z "$KEYS" ]] && KEYS="gPSNR gSSIM"
 
     local ref_data= tst_data=
     ref_data=$(grep 'codecId:' "$REF_LOG" || true)
     tst_data=$(grep 'codecId:' "$TST_LOG" || true)
 
-    local vectors
+    local vectors header= key src
     read_vectors "$ref_data" "$tst_data"; vectors=$REPLY
 
-    printf " %7s %7s %-11s %s\n" "BD-rate" "BD-PSNR" "resolution" "SRC"
+    for key in $KEYS; do
+        printf -v REPLY "%11s" "BDR-$key"
+        header="$header $REPLY"
+    done
+    printf "$header    %11s %s\n" "resolution" "SRC"
 
-    local src
+    local result_tot=
     for src in $vectors; do
-        local refpoints
-        read_refpoints "$src" "$KEY" "$ref_data" "$tst_data"; refpoints=$REPLY
+        local result=
+        for key in $KEYS; do
+            local refpoints
+            read_refpoints "$src" "$key" "$ref_data" "$tst_data"; refpoints=$REPLY
 
-        local result= bdRate= bdPSNR= srcRes= srcFps=
-        result=$(python $bdratePy $refpoints)
-        dict_getValue "$result" BD-rate; bdRate=$REPLY
-        dict_getValue "$result" BD-PSNR; bdPSNR=$REPLY
+            local info= bdRate= bdPSNR= srcRes= srcFps=
+            info=$(python $bdratePy $refpoints)
+            dict_getValue "$info" BD-rate; bdRate=$REPLY
+            dict_getValue "$info" BD-PSNR; bdPSNR=$REPLY
+
+#           printf -v REPLY "%7.2f %7.2f" "$bdRate" "$bdPSNR"
+            printf -v REPLY "%11.2f" "$bdRate"
+            result="$result $REPLY"
+            result_tot="$result_tot $bdRate"
+        done
+        result_tot="$result_tot"$'\n'
 
         detect_resolution_string "$src"; srcRes=$REPLY
         detect_framerate_string "$src"; srcFps=$REPLY
-        printf " %7.2f %7.2f %-11s %s\n" "$bdRate" "$bdPSNR" "${srcRes}@${srcFps}" "$src"
+        printf "%s    %11s %s\n" "$result" "${srcRes}@${srcFps}" "$src"
     done
+
+    set -- ${result_tot%%$'\n'*}
+    local index=1 result=
+    for key; do # last row is empty
+        bdRate=$(echo "$result_tot" | awk -v col=$index '{ sum+=$col } END { printf sum/(NR-1) }')
+        printf -v REPLY "%11.4f" "$bdRate"
+        result="$result $REPLY"
+        index=$(( index + 1))
+    done
+    printf "%s    %s\n" "$result" "<<< average >>>"
 }
 
 read_refpoints()
