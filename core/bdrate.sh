@@ -8,7 +8,6 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 
 REPORT=bdrate.log
-KEY=gPSNR
 DIR_OUT=$dirScript/../out # <=> testbench
 
 usage()
@@ -41,7 +40,7 @@ entrypoint()
 {
 	[[ "$#" -eq 0 ]] && usage && echo "error: arguments required" >&2 && return 1
 
-	local cmd_vec= cmd_codecs= cmd_report=$REPORT cmd_key=$KEY
+	local cmd_vec= cmd_codecs= cmd_report=$REPORT cmd_keys=
     local prev=
 	for arg do
 		case $arg in
@@ -59,12 +58,13 @@ entrypoint()
         else
     		case $prev in
     			-o|--out*) 		cmd_report=$arg;;
-			    -k|--key)       cmd_key=$arg;;
+			    -k|--key)       cmd_keys="$cmd_keys $arg";;
     			-c|--codec) 	cmd_codecs="$cmd_codecs; $arg";;
 	    	esac
             prev=
         fi
 	done
+    [[ -z $cmd_keys ]] && cmd_keys="gPSNR gSSIM"
 
     local codecs_long
     preproc_codec_list "$cmd_codecs"; codecs_long=$REPLY
@@ -109,13 +109,13 @@ entrypoint()
         local tag
         get_codec_tag "$codec_long"; tag=$REPLY
         local report="$DIR_OUT/bdrate_${timestamp}_${tag}.log"
-        echo "$timestamp ref:$ref_codec[$ref_prms] tst:$codec[$prms] KEY=$cmd_key [$info]" | tee -a "$cmd_report"
+        echo "$timestamp ref:$ref_codec[$ref_prms] tst:$codec[$prms] [$info]" | tee -a "$cmd_report"
         # Make sure we have valid data
         if ! grep -m 1 'codecId:' "$report.kw" > /dev/null ; then
             echo "no data, skip" | tee -a "$cmd_report"
             continue;
         fi
-        "$dirScript/bdrate/bdrate.sh" -i "$ref_report.kw" -i "$report.kw" --key "$cmd_key" | tee -a "$cmd_report"
+        "$dirScript/bdrate/bdrate.sh" -i "$ref_report.kw" -i "$report.kw" --key "$cmd_keys" | tee -a "$cmd_report"
     done
     IFS=$oldIFS
 }
