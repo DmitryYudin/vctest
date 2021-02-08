@@ -245,6 +245,20 @@ entrypoint()
 
 	rm -f -- $testplan
 
+    #
+    # Backup executables
+    #
+    local codecId
+	for codecId in $CODECS; do
+        local backupDir encoderDir
+		codec_hash $codecId $target; backupDir=$DIR_OUT/$REPLY/exe
+        [[ -d $backupDir ]] && continue
+        codec_exe $codecId $target; encoderDir=$(dirname $DIR_BIN/$REPLY)
+        mkdir -p ${backupDir}_tmp
+        cp -f $encoderDir/* ${backupDir}_tmp
+        mv ${backupDir}_tmp ${backupDir}
+    done
+
 	#
 	# Reporting
 	#
