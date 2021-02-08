@@ -90,13 +90,15 @@ entrypoint()
     local tag=    
     get_codec_tag "$ref_codec_long"; tag=$REPLY
     local ref_report="$DIR_OUT/bdrate_${timestamp}_${tag}.log"
+    local ref_codec_hash
+    get_codec_hash_from_kw "$ref_report.kw"; ref_codec_hash=$REPLY
 
     # Make sure we have valid data
     if ! grep -m 1 'codecId:' "$ref_report.kw" >/dev/null; then
         error_exit "no date for reference codec '$ref_codec_long'"
     fi
 
-    # Calcultate BD-rate
+    # Calculate BD-rate
     local info
     get_test_info "$@"; info=$REPLY
 
@@ -109,7 +111,10 @@ entrypoint()
         local tag
         get_codec_tag "$codec_long"; tag=$REPLY
         local report="$DIR_OUT/bdrate_${timestamp}_${tag}.log"
-        echo "$timestamp ref:$ref_codec[$ref_prms] tst:$codec[$prms] [$info]" | tee -a "$cmd_report"
+        local codec_hash
+        get_codec_hash_from_kw "$report.kw"; codec_hash=$REPLY
+
+        echo "$timestamp ref:$ref_codec_hash[$ref_prms] tst:$codec_hash[$prms] [$info]" | tee -a "$cmd_report"
         # Make sure we have valid data
         if ! grep -m 1 'codecId:' "$report.kw" > /dev/null ; then
             echo "no data, skip" | tee -a "$cmd_report"
@@ -118,6 +123,14 @@ entrypoint()
         "$dirScript/bdrate/bdrate.sh" -i "$ref_report.kw" -i "$report.kw" --key "$cmd_keys" | tee -a "$cmd_report"
     done
     IFS=$oldIFS
+}
+
+get_codec_hash_from_kw()
+{
+    local report_kw=$1; shift
+    local info
+    info=$(grep 'codecId:' "$report_kw" | head -n 1 || true)
+	dict_getValue "$info" encExeHash;
 }
 
 get_codec_tag()
