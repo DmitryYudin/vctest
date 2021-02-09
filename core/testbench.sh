@@ -662,7 +662,7 @@ encode_single_file()
 
 			# Stop CPU monitor
 			stop_cpu_monitor
-			trap -- EXIT
+			trap - EXIT
 		fi
 	else
 		local remoteDirOut remoteOutputDir

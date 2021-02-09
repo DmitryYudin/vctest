@@ -294,7 +294,7 @@ jobsStartWorker()
 		cmd=${REPLY#*$ARG_DELIM}
 	done
     debug_log worker "exit main loop"
-	trap -- EXIT
+	trap - EXIT
 }
 
 # unicode characters
@@ -685,8 +685,8 @@ jobsRunTasks()
 		fi
 	done
 
-	trap -- INT
-	trap -- EXIT 
+	trap - INT
+	trap - EXIT 
 
 	# Do cleanup
 	jobsOnEXIT || true
