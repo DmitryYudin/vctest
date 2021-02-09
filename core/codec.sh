@@ -219,7 +219,7 @@ codec_verify()
 	CODECS=${codecList# }
 
 	rm -rf -- "$dirOut"
-	trap -- EXIT
+	trap - EXIT
 
 	if $remote; then
 		# Push executable (folder content) on a target device
