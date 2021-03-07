@@ -28,7 +28,7 @@ TARGET_setTarget() # <adb|ssh> [remote.local]
 	fi
 
 	if [[ $target == adb ]]; then
-		if command -p adb 1>/dev/null 2>&1; then
+		if command -p -v adb &>/dev/null; then
 			HOST_ADB=adb
 		else
 			# Try default location if not found in $PATH

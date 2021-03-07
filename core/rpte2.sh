@@ -99,13 +99,13 @@ jobsStartPing()
 	local period=$1
 	{
 		trap 'return 0' INT
-		while echo "ping::0:"$ARG_DELIM > $__jobsStatusPipe ; do
+		while echo "ping::0:" > $__jobsStatusPipe ; do
 			sleep $period			
 		done
 	} </dev/null 1>/dev/null 2>/dev/null &
 }
 
-pipeOpen()
+pipeOpen() # always from worker
 {
     local mode=$1; shift
     local pipeName=$1; shift
@@ -116,6 +116,7 @@ pipeOpen()
         # Unfortunately, this does not help: We still observe lost and broken messages.
     	while ! exec 3>$pipeName; do
 	    	[[ ! -e $pipeName ]] && return 1
+            debug_log worker "can't open the pipe, sleep for a second"
 		    sleep .1s
     	done
     else
@@ -225,8 +226,6 @@ jobsStartWorker()
 	local -
 	set -eu
 
-    debug_log_init worker
-
 	local id=$1; shift
 	local cmd=$1; shift
 	local userText=$1; shift
@@ -245,7 +244,7 @@ jobsStartWorker()
             echo "on_exit: can't report error status, pipe closed" >&2
             debug_log worker "Status NOT reported"
         else
-	    	echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"$ARG_DELIM >&3
+	    	echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" >&3
     		exec 3>&-;
             debug_log worker "Status reported"
         fi
@@ -268,7 +267,7 @@ jobsStartWorker()
             debug_log worker "Status NOT reported"
             break
         else
-    		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd"$ARG_DELIM >&3
+    		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" >&3
 	    	exec 3>&-;
         fi
 		runningTaskId=
@@ -492,6 +491,7 @@ jobsRunTasks()
 	__jobsDoneMax=0
 	__jobsStartSec=$SECONDS
 	__jobsDisplay=
+    # Count jobs number
 	while readNewTask "$delim"; do
 		[[ -z "$REPLY" ]] && break
 		__jobsDoneMax=$(( __jobsDoneMax + 1 ))
@@ -603,14 +603,18 @@ jobsRunTasks()
 
 	setWorkerGone() {
 		local pid=$1 x=; shift
-		debug_log master "setWorkerGone pid=$pid"
+		debug_log master "setWorkerGone pid=$pid [start waiting pid]"
 
 		{ wait $pid || true; } 2>/dev/null  # may have already gone
+
 		set -- $__jobsPid; # remove from wait list
 		for x; do shift; if [[ $x != $pid ]]; then set -- "$@" $x; fi; done
 		__jobsPid="$@"
 		__jobsRunning=$((__jobsRunning - 1))		# worker exit
+
+		debug_log master "setWorkerGone pid=$pid [onchain $__jobsPid]"
 	}
+
 	while : ; do
 		local pid # <- long live variable
 		# Until have workers running
@@ -623,7 +627,7 @@ jobsRunTasks()
 			# Only extract one message per pipe read access (i.e. not reading from 'fd' in a loop).
 			# This case we will have 'read' blocked till message appeared in a pipe.
 			# The return status is always expected to be zero with the exception for the interrupt.
-			read -d $ARG_DELIM 2>/dev/null <$__jobsStatusPipe || continue
+			read -r 2>/dev/null <$__jobsStatusPipe || continue
 
 			# This is a 'ping' - skip it
 			case $REPLY in ping:*) continue; esac
@@ -639,7 +643,7 @@ jobsRunTasks()
 			if [[ -z "$id" ]]; then
 				setWorkerGone $pid; pid= # worker exit due to interrupt
 			else
-				debug_log master "jobsDone $id pid=$pid status=$status"
+				debug_log master "jobsDone id=$id pid=$pid status=$status"
 
 				__jobsDone=$(( __jobsDone + 1 ))
 				if [[ "$status" != 0 ]]; then
