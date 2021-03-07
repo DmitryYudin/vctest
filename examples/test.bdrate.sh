@@ -1,3 +1,4 @@
+#!/bin/bash
 set -eu -o pipefail
 
 # First codec used as the BD-rate reference. The ';' delimiter is optional.

@@ -1,3 +1,4 @@
+#!/bin/bash
 set -eu -o pipefail
 
 dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
@@ -30,17 +31,17 @@ usage()
 	    Individual (per codec) parameters can be set with '-c' option
 
 	    Exactly 4 parameters for '-p' option must be set to evaluate bd-rate scores.
-    
+
 	Example:
-	    $(basename $0) -i vec_720p_30fps.yuv -p'22 27 32 37' -c kingsoft -c 'kingsoft --preset ultrafast' 
-	    $(basename $0) -i vec_720p_30fps.yuv -p'700 1000 1400 2000' -c 'kingsoft x265 h265demo' 
+	    $(basename $0) -i vec_720p_30fps.yuv -p'22 27 32 37' -c kingsoft -c 'kingsoft --preset ultrafast'
+	    $(basename $0) -i vec_720p_30fps.yuv -p'700 1000 1400 2000' -c 'kingsoft x265 h265demo'
 
 	EOF
 }
 
 entrypoint()
 {
-	[[ "$#" -eq 0 ]] && usage && echo "error: arguments required" >&2 && return 1
+	[[ $# -eq 0 ]] && usage && echo "error: arguments required" >&2 && return 1
 
 	local cmd_vec= cmd_codecs= cmd_report=$REPORT cmd_keys= cmd_raw_report=
 
@@ -58,7 +59,7 @@ entrypoint()
 			    -k|--key)       prev=$arg;;
     			-c|--codec) 	prev=$arg;;
     			*) set -- "$@" "$arg";;
-	    	esac            
+	    	esac
         else
     		case $prev in
     			-o|--out*) 		REPORT=$arg;;
@@ -84,7 +85,7 @@ entrypoint()
         local prms=${codec_long#$codec}; prms=${prms# }
         local tag
         get_codec_tag "$codec_long"; tag=$REPLY
-        local report="$DIR_OUT/bdrate_${timestamp}_${tag}.log"
+        local report=$DIR_OUT/bdrate_${timestamp}_${tag}.log
         "$dirScript/testbench.sh" -c "$codec" $prms -o "$report" "$@"
 
         # Skip reference code
@@ -96,9 +97,9 @@ entrypoint()
     local ref_codec_long=${codecs_long%%;*}; codecs_long=${codecs_long#$ref_codec_long;}
     local ref_codec=${ref_codec_long%% *}
     local ref_prms=${ref_codec_long#$ref_codec}; ref_prms=${ref_prms# }
-    local tag=    
+    local tag=
     get_codec_tag "$ref_codec_long"; tag=$REPLY
-    local ref_report="$DIR_OUT/bdrate_${timestamp}_${tag}.log"
+    local ref_report=$DIR_OUT/bdrate_${timestamp}_${tag}.log
     local ref_codec_hash
     get_codec_hash_from_kw "$ref_report.kw"; ref_codec_hash=$REPLY
 
@@ -119,7 +120,7 @@ entrypoint()
         local prms=${codec_long#$codec}; prms=${prms# }
         local tag
         get_codec_tag "$codec_long"; tag=$REPLY
-        local report="$DIR_OUT/bdrate_${timestamp}_${tag}.log"
+        local report=$DIR_OUT/bdrate_${timestamp}_${tag}.log
         local codec_hash
         get_codec_hash_from_kw "$report.kw"; codec_hash=$REPLY
 
@@ -156,14 +157,14 @@ preproc_codec_list()
 {
     local codecs=$1; shift
 
+    # remove possible delimiters
+    codecs=${codecs//;/ }
+
     # shrink spaces
     codecs=$(echo "$codecs" | tr -s "[:space:]")
 
     local known_codecs
     codec_get_knownId; known_codecs=$REPLY
-
-    # remove possible delimiters
-    codecs=$(echo "$codecs" | tr -d ';')
 
     # preppend codecId with delimiter
     local token known_codec retval=
@@ -181,7 +182,7 @@ preproc_codec_list()
     local oldIFS=$IFS IFS=';' token retval=
     for token in $codecs; do
         IFS=$oldIFS
-        local x="$token" unique= found=false
+        local x=$token unique= found=false
         x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}
         for unique in $retval; do
             [[ $x == $unique ]] && found=true && break
@@ -204,7 +205,7 @@ get_test_info()
     		case $arg in
     			-i|--in*) 		prev=$arg;;
     			*) set -- "$@" "$arg";;
-	    	esac            
+	    	esac
         else
             prev=
         fi

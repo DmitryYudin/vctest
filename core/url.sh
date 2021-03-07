@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 # Copyright © 2019 Dmitry Yudin. All rights reserved.
 # Licensed under the Apache License, Version 2.0

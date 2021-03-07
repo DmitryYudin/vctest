@@ -3,7 +3,7 @@ import bjontegaard_metric
 
 def usage():
     name=os.path.basename(sys.argv[0])
-    print(f"usage: %s -r \"kbps0 ... kbps3\" -p \"psnr0 ... psnr3\" -r \"...\" -p \"...\"" % name)
+    print("usage: %s -r \"kbps0 ... kbps3\" -p \"psnr0 ... psnr3\" -r \"...\" -p \"...\"" % name)
     print("    -h                - This help")
     print("    -b <rate_list>    - List of bitrates in kbps")
     print("    -p <psnr_list>    - List of PSNR values")
@@ -21,16 +21,15 @@ def usage():
 
 def error_exit(msg):
     if msg != None:
-        print ("Error: %s\n" % msg, file=sys.stderr, flush=True)
+        sys.stderr.write ("Error: %s\n" % msg)
     sys.exit(1)
 
 def flatmap(f, l): # https://stackoverflow.com/questions/11264684/flatten-list-of-lists
     return [y for sublist in map(f, l) for y in sublist]
 
-def split_string_of_float(input: str):
+def split_string_of_float(input):
     result = [input]
-    delims = [' ', ',', ';' ]
-    for delim in [*delims]:
+    for delim in [' ', ',', ';' ]:
         result = flatmap(lambda x: x.split(delim), result)
     result = [i for i in result if i] # remove empty
     result = [float(x) for x in result]

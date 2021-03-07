@@ -1,3 +1,4 @@
+#!/bin/bash
 set -eu -o pipefail
 
 CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"

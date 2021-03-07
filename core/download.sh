@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 # Copyright © 2019 Dmitry Yudin. All rights reserved.
 # Licensed under the Apache License, Version 2.0
@@ -100,10 +101,11 @@ entrypoint()
         esac
         shift $nargs
     done
-	[[ -z "$INPUT" ]] && error_exit "input file not set"
 
     DIR_VEC=$(ospath "$DIR_VEC")
     [[ -n $do_map || -n $do_stat ]] && { map_vectors "$do_map" "$do_stat"; return; }
+
+	[[ -z "$INPUT" ]] && error_exit "input file not set"
 
     print_console "Max resolution:   $MAX_FRAME_SIZE\n"
     print_console "Max size (Mb):    $MAX_FILE_SIZE_MB\n"
