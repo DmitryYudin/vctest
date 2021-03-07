@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 # For the sourcing.
 #
@@ -13,6 +14,7 @@
 #
 
 dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
+. "$dirScript/utility_functions.sh"
 
 DIR_BIN=$(ospath "$dirScript"/../bin)
 
@@ -120,6 +122,10 @@ codec_exe()
             error_exit "no executable associated with '$codecId' codecId."
         fi
 		exe_${codecId} $target; encExe=${REPLY//\\//}
+        if [[ -z "$encExe" ]]; then
+            [[ -n $do_not_exit ]] && echo "warning: no executable found for '$codecId@$target'" && return 1
+            error_exit "no executable found for '$codecId@$target'"
+        fi
 		if [[ ! -f "$DIR_BIN/$encExe" ]]; then
             [[ -n $do_not_exit ]] && echo "warning: can't find '$DIR_BIN/$encExe'" && return 1
             error_exit "can't find '$DIR_BIN/$encExe'"
@@ -178,7 +184,7 @@ codec_verify()
 {
 	local remote=$1; shift
 	local target=$1; shift
-	local CODECS="$*" codecId= cmd= codecList= encExe=
+	local CODECS="$*" codecId= cmd= codecEnabled= encExe= codecRemoved=
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
@@ -191,12 +197,10 @@ codec_verify()
 		if codec_exe $codecId $target do_not_exit; then
             encExe=$REPLY
         else
-			echo "Remove '$codecId' from a list." >&2
+            codecRemoved="$codecRemoved $codecId"
 			continue
 		fi
-		if $remote; then
-			codecList="$codecList $codecId"
-        else
+		if ! $remote; then
 			local cmd=$DIR_BIN/$encExe
 			# temporary hack, for backward compatibility (remove later)
 			if [[ $codecId == h265demo ]]; then
@@ -209,13 +213,15 @@ codec_verify()
 
 			if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
 				echo "warning: encoding error. Remove '$codecId' from a list." >&2;
-            else
-    			codecList="$codecList $codecId"
+                codecRemoved="$codecRemoved $codecId"
+                continue
 			fi
 		fi
+		codecEnabled="$codecEnabled $codecId"
 	done
     popd >/dev/null
-	CODECS=${codecList# }
+    [[ -n "$codecRemoved" ]] && echo "Codecs removed:$codecRemoved" >&2
+	CODECS=${codecEnabled# }
 
 	rm -rf -- "$dirOut"
 	trap - EXIT

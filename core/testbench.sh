@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 # Copyright © 2019 Dmitry Yudin. All rights reserved.
 # Licensed under the Apache License, Version 2.0
@@ -20,6 +21,7 @@ VECTORS="
 	akiyo_352x288_30fps.yuv
 	foreman_352x288_30fps.yuv
 "
+DIR_BIN=$(ospath "$dirScript"/../bin)
 DIR_OUT=$(ospath "$dirScript"/../out)
 DIR_VEC=$(ospath "$dirScript"/../vectors)
 NCPU=0
@@ -27,7 +29,7 @@ TRACE_HM=0
 ENABLE_CPU_MONITOR=0
 readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
 readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
-readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
+timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 readonly dirTmp=$(tempdir)/vctest/$timestamp
 readonly statExe=$dirScript/../'bin/TAppDecoder.exe'
 readonly parsePy=$dirScript/../'core/parseTrace.py'
@@ -90,9 +92,9 @@ entrypoint()
 			-i|--in*) 		cmd_vec="$cmd_vec $2";;
 			-o|--out*) 		cmd_report=$2;;
 			-c|--codec*) 	cmd_codecs=$2;;
-			-t|--thread*)   cmd_threads=$2;;
-			-p|--prm*) 		cmd_prms=$2;;
-			   --pre*) 		cmd_presets=$2;;
+			-t|--threads)   cmd_threads=$2;;
+			-p|--prms) 		cmd_prms=$2;;
+			   --preset) 	cmd_presets=$2;;
 			-j|--ncpu)		cmd_ncpu=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; remote=true; nargs=1;;
@@ -124,6 +126,13 @@ entrypoint()
 	# for multithreaded run, run in single process to get valid cpu usage estimation
 	[[ $THREADS -gt 1 ]] && NCPU=1
 
+    local numCodecs numPresets
+    list_size "$CODECS"; numCodecs=$REPLY
+    list_size "$PRESETS"; numPresets=$REPLY
+    if [[ $numCodecs -gt 1 ]]; then
+        [[ $numPresets -gt 1 ]] && error_exit "only single preset option allowed if multple codecs specified"
+    fi
+
 	if $remote; then
 		TARGET_setTarget $target "$dirScript"/../remote.local
 		TARGET_getFingerprint; targetInfo=$REPLY
@@ -141,6 +150,7 @@ entrypoint()
 
 	# Remove codecs we can't run
 	codec_verify $remote $target $CODECS; CODECS=$REPLY
+    [[ -z "$CODECS" ]] && error_exit "no codecs to test"
 
 	local startSec=$SECONDS
 
@@ -215,7 +225,7 @@ entrypoint()
         local cpumon=
         [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon="--mon"
 		for outputDirRel in $encodeList; do
-			echo "$self --ncpu $NCPU $cpumon -- encode_single_file $remote \"$outputDirRel\""
+			echo "$self --ncpu $NCPU $cpumon -- encode_single_file $remote $outputDirRel"
 		done > $testplan
 		execute_plan $testplan $NCPU
 	fi
@@ -228,7 +238,7 @@ entrypoint()
 	progress_begin "[3/5] Decoding..." "$decodeList"
 	if [[ -n "$decodeList" ]]; then
 		for outputDirRel in $decodeList; do
-			echo "$self -- decode_single_file \"$outputDirRel\""
+			echo "$self -- decode_single_file $outputDirRel"
 		done > $testplan
 		execute_plan $testplan $NCPU
 	fi
@@ -241,7 +251,7 @@ entrypoint()
 	progress_begin "[4/5] Parsing..." "$parseList"
 	if [[ -n "$parseList" ]]; then
 		for outputDirRel in $parseList; do
-			echo "$self -- parse_single_file \"$outputDirRel\""
+			echo "$self -- parse_single_file $outputDirRel"
 		done > $testplan
 		execute_plan $testplan $NCPU
 	fi
@@ -343,10 +353,10 @@ prepare_optionsFile()
 		detect_framerate_string "$DIR_VEC/$src"; srcFps=$REPLY
 		detect_frame_num "$DIR_VEC/$src" "$srcRes"; srcNumFr=$REPLY
 
-		local args="--res "$srcRes" --fps $srcFps --threads $THREADS"
-		[[ $bitrate == '-' ]] || args="$args --bitrate $bitrate"
-		[[ $qp == '-' ]]     || args="$args --qp $qp"
-		[[ $preset == '-' ]] || args="$args --preset $preset"
+		local args="--res $srcRes --fps $srcFps --threads $THREADS"
+		[[ '-' == $bitrate ]] || args="$args --bitrate $bitrate"
+		[[ '-' == $qp      ]] || args="$args --qp $qp"
+		[[ '-' == $preset  ]] || args="$args --preset $preset"
 
 		local encExe= encFmt= encExeHash= encCmdArgs= encCmdHash=
 		codec_exe $codecId $target; encExe=$REPLY
@@ -392,12 +402,7 @@ execute_plan()
 PERF_ID=
 start_cpu_monitor()
 {
-	local codecId=$1; shift
-	local cpuLog=$1; shift
-
-	local encExe=
-	codec_exe $codecId windows; encExe=$REPLY
-
+	local encExe=$1; shift
 	local name=${encExe##*/}; name=${name%.*}
 
 	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
@@ -437,9 +442,7 @@ progress_begin()
 	done
 	print_console "$name\n"
 
-	if [[ $PROGRESS_CNT_TOT == 0 ]]; then
-		print_console "No tasks to execute\n\n"
-	else
+	if [[ $PROGRESS_CNT_TOT != 0 ]]; then
 		printf 	-v str "%8s %4s %-11s %11s %5s %2s %6s" "Time" $PROGRESS_CNT_TOT codecId resolution '#frm' QP BR 
 		printf 	-v str "%s %9s %2s %-16s %-8s %s" "$str" PRESET TH CMD-HASH ENC-HASH SRC
 		PROGRESS_HDR=$str
@@ -627,8 +630,9 @@ encode_single_file()
 	# temporary hack, for backward compatibility (remove later)
 	[[ $codecId == h265demo ]] && encCmdArgs="-c h265demo.cfg $encCmdArgs"
 
-	local cmd="$encExe $encCmdArgs $encCmdSrc $encCmdDst"
+	local cmd="$encCmdArgs $encCmdSrc $encCmdDst"
 	echo "$cmd" > cmd # memorize
+	echo "$encExe" > exe # memorize
 
 	local stdoutLog=stdout.log
 	local cpuLog=cpu.log
@@ -647,21 +651,21 @@ encode_single_file()
 		if $estimate_execution_time; then
 			# Start CPU monitor
 			trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
-			start_cpu_monitor "$codecId" "$cpuLog" > $cpuLog
+			start_cpu_monitor "$encExe" > $cpuLog
 		fi
 
 		# Encode
-		local consumedNsec=$(date +%s%3N) # seconds*1000
-		if ! { echo "yes" | $cmd; } 1>$stdoutLog 2>&1 || [ ! -f "$dst" ]; then
+		local consumedSec=$(date +%s)
+		if ! { echo "yes" | $encExe $cmd; } 1>$stdoutLog 2>&1 || [ ! -f "$dst" ]; then
 			echo "" # newline if stderr==tty
 			cat "$stdoutLog" >&2
 			error_exit "encoding error, see logs above"
 		fi
-		consumedNsec=$(( $(date +%s%3N) - consumedNsec ))
+		consumedSec=$(( $(date +%s) - consumedSec ))
 
 		if $estimate_execution_time; then
 			local fps=0
-			[[ $consumedNsec != 0 ]] && fps=$(( 1000*srcNumFr/consumedNsec ))
+			[[ $consumedSec != 0 ]] && fps=$(( 1000*srcNumFr/consumedSec ))
 			echo "$fps" > $fpsLog
 
 			# Stop CPU monitor
@@ -692,10 +696,10 @@ encode_single_file()
 
 			consumedSec=\$(date +%s)
             if [[ $ENABLE_CPU_MONITOR == 1 ]]; then # run decoder in background
-			    $cmd </dev/null 1>$stdoutLog 2>&1 &
+			    $encExe $cmd </dev/null 1>$stdoutLog 2>&1 &
                 pid=\$!
             else
-			    $cmd </dev/null 1>$stdoutLog 2>&1
+			    $encExe $cmd </dev/null 1>$stdoutLog 2>&1
             fi
 			error_code=0
             if [[ $ENABLE_CPU_MONITOR == 1 ]]; then
@@ -742,12 +746,12 @@ decode_single_file()
 	dict_getValue "$info" srcFps; srcFps=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
-	local recon=$(basename "$dst").yuv
+	local recon=$(basename $dst).yuv
 	local kbpsLog=kbps.log
 	local summaryLog=summary.log
 
 	local sizeInBytes= kbps=
-	sizeInBytes=$(stat -c %s "$dst")
+	sizeInBytes=$(stat -c %s $dst)
 	kbps=$(awk "BEGIN { print 8 * $sizeInBytes / ($srcNumFr/$srcFps) / 1000 }")
 	echo "$kbps" > $kbpsLog
 
@@ -759,11 +763,11 @@ decode_single_file()
 	esac
 
 	local frameLog=frame.log
-	if [[ "$decoderId" == ffmpeg ]]; then
-		$ffmpegExe -y -loglevel error -i "$dst" "$recon"
+	if [[ $decoderId == ffmpeg ]]; then
+		$ffmpegExe -y -loglevel error -i $dst $recon
 
 		local ffprobeLog=ffprobe.log
-		$ffprobeExe -v error -show_frames -i "$dst" | tr -d $'\r' > $ffprobeLog		
+		$ffprobeExe -v error -show_frames -i $dst | tr -d $'\r' > $ffprobeLog		
 		{ # dump one liners for each frame from ffprobe output
 			local type= size= cnt=0
 			while read -r; do
@@ -776,15 +780,16 @@ decode_single_file()
 				esac
 			done < $ffprobeLog
 		} > $frameLog
-	elif [[ "$decoderId" == vvdec ]]; then
+	elif [[ $decoderId == vvdec ]]; then
     	local vvdecLog=vvdec.log
-        $vvdecExe -b "$dst" -o "$recon" > $vvdecLog
+        $vvdecExe -b $dst -o $recon > $vvdecLog
     fi
 
 	local ssimLog=ssim.log
 	local psnrLog=psnr.log
 	# ffmpeg does not accept filename in C:/... format as a filter option
-	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i "$DIR_VEC/$src" -s $srcRes -i "$recon" -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
+    local log
+	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i $DIR_VEC/$src -s $srcRes -i $recon -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
 		echo "$log" && return 1
 	fi
 
@@ -797,12 +802,12 @@ decode_single_file()
 		h265)
             if [[ "$TRACE_HM" == 1 ]]; then
     			local statLog=TraceDec.txt
-	    		$statExe -b "$dst" > /dev/null
+	    		$statExe -b $dst > /dev/null
             fi
 		;;
 	esac
 
-	rm -f "$recon"
+	rm -f $recon
 
 	date "+%Y.%m.%d-%H.%M.%S" > decoded.ts
 
@@ -815,10 +820,11 @@ parse_single_file()
 	local outputDir="$DIR_OUT/$outputDirRel"
 	pushd "$outputDir"
 
-	local info= codecId=
+	local info= codecId= srcNumFr=
     { read -r info; } < "info.kw"
 
 	dict_getValue "$info" codecId; codecId=$REPLY
+	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
 	local stdoutLog=stdout.log
 	local kbpsLog=kbps.log
@@ -835,7 +841,7 @@ parse_single_file()
 	if [[ -f "$fpsLog" ]]; then # may not exist
         { read -r extFPS; } < "$fpsLog"
 	fi
-	intFPS=$(parse_stdoutLog "$codecId" "$stdoutLog")
+	intFPS=$(parse_stdoutLog $codecId $stdoutLog $srcNumFr)
     { read -r kbps; } < "$kbpsLog"
 	[[ -f "$summaryLog" ]] && framestat=$(parse_framestat "$summaryLog")
 	[[ -f "$statLog" ]] && blockstat=$(python "$parsePy" "$statLog")
@@ -950,6 +956,7 @@ parse_stdoutLog()
 {
 	local codecId=$1; shift
 	local log=$1; shift
+    local numFrames=$1; shift
 	local fps= snr=
 	case $codecId in
 		ashevc)

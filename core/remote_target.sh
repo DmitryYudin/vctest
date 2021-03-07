@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 # Copyright © 2020 Dmitry Yudin. All rights reserved.
 # Licensed under the Apache License, Version 2.0
@@ -28,7 +29,7 @@ TARGET_setTarget() # <adb|ssh> [remote.local]
 	fi
 
 	if [[ $target == adb ]]; then
-		if command -p adb 1>/dev/null 2>&1; then
+		if command -p -v adb &>/dev/null; then
 			HOST_ADB=adb
 		else
 			# Try default location if not found in $PATH
