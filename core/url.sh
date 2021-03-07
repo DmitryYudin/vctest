@@ -87,7 +87,7 @@ entrypoint()
 		local URLs=
 		if [[ $# != 0 ]]; then
 			local url_list=$1
-			URLs=$(cat "$url_list" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/#.*//' | paste)
+			URLs=$(cat "$url_list" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/#.*//' | grep '^http' | paste)
 			shift
 		else
 			while read url; do
@@ -108,22 +108,28 @@ entrypoint()
 				wmax=$(( wmax - 63))
 			fi
 		fi
+        make_short_name() {
+            local wmax=$1; shift
+            local name=$1; shift
+			if [[ $wmax -eq 0 || ${#name} -le $wmax ]]; then
+                REPLY=$name
+            else
+				local tail=$(( wmax - 15 - 3 ))
+				name=${name#*://}
+			 	[[ $tail -gt 0 ]] && REPLY=${name:0:15}...${name: -$tail}
+			fi
+        }
 		for url in $URLs; do
 			local url_short=$url
-			if [[ $wmax -gt 0 && ${#url} -gt $wmax ]]; then
-				local tail=$(( wmax - 15 - 3))
-				url_short=${url_short#*://}
-			 	[[ $tail -gt 0 ]] && url_short=${url_short:0:15}...${url_short: -$tail}
-			fi
-
+            make_short_name $wmax $url; url_short=$REPLY
 			if [[ -n "$backend" ]]; then
-				x=$(URL_info "$url" "$@" --format)
-				printf "%s: %-55s %s\n" "$URL_BACKEND" "$x" "$url_short"
+				URL_info "$url" "$@" --format
+				printf "%s: %-55s %s\n" "$URL_BACKEND" "$REPLY" "$url_short"
 			else
-				for i in curl ps; do
+				for i in curl ps1 ps2; do
 					URL_BACKEND=$i
-					x=$(URL_info "$url" "$@" --format)
-					printf "%4s: %-55s %s\n" "$URL_BACKEND" "$x" "$url_short"
+					URL_info "$url" "$@" --format
+					printf "%4s: %-55s %s\n" "$URL_BACKEND" "$REPLY" "$url_short"
 				done
 			fi
 		done 
@@ -167,46 +173,110 @@ URL_set_timeout_sec()
 ####################################
 #  Info
 ####################################
-filename_from_disposition()
-{
-	# exp: 'attachment; filename=aria2-1.35.0-win-32bit-build1.zip'
-	local data=$1
-	local data=${data//;/ } # ';' -> ' '
-	local x
-	for x in $data; do
-        REPLY=${x#*filename=}
-        if [[ "$x" != $REPLY ]]; then
-            REPLY=${REPLY#\"}
-            REPLY=${REPLY%\"}
-        fi
-	done
-    REPLY=
-}
-filename_from_location_PRMS()
-{
-	local url=$1
-	local opt=$(echo "$url" | cut -s -d'?' -f2-)
-	opt=${opt//&/ } # '&' -> ' '
-	local x
-	for x in $opt; do
-		local key=${x%%=*}
-		local val=${x#*=}
-		# exp: 'attachment; filename=aria2-1.35.0-win-32bit-build1.zip'
-		if echo "$key" | grep -q -i 'content-disposition'; then
-			val="$(__urldecode "$val")"
-			filename_from_disposition "$val"
-            [[ -n "$REPLY" ]] && return
-		fi
-	done
-    REPLY=
-}
-filename_from_url() # <=> extention(basename($url)) != empty
+filename_from_url() # <=> basename($url)
 {
 	local url=$1
 	local name=${url%%\?*} 	# xxx?***
 	name=${name##*/}  		# ***/***/xxx
     REPLY=${name}
 }
+
+filename_from_request()
+{
+	local url=$1
+    local addr=${url%%'?'*}
+    local args=${url#$addr}
+    [[ -n "$args" ]] && REPLY= && return
+    filename_from_url "$url"
+}
+
+trim_leading_spaces()
+{
+	REPLY=${1#"${1%%[! $'\t']*}"} # Remove leading whitespaces 
+}
+
+extract_value_from_headers()
+{
+    local headers=${1//$'\r'/}; shift
+    local TARGET_KEY=$1; shift
+    local RETVAL_key= RETVAL_val=
+
+    process_kw() {
+        local key=$1; shift
+        local val=$1; shift
+        extract_value_by_key() { # key=val; key=val; ...
+            local data=${1// /}; shift
+            local wanted_key=$1; shift
+            data=${data//;/ }
+            for REPLY in $data; do
+                local key=${REPLY%%=*}
+                if [[ $key == $wanted_key ]]; then
+                    REPLY=${REPLY#$wanted_key}; REPLY=${REPLY#=}
+                    return
+                fi
+            done
+            REPLY=
+        }
+        REPLY=
+        if [[ $TARGET_KEY == disposition ]]; then
+            case $key in *[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Dd][Ii][Ss][Pp][Oo][Ss][Ii][Tt][Ii][Oo][Nn])
+                extract_value_by_key "$val" filename;;
+            esac
+        fi
+        if [[ $TARGET_KEY == location ]]; then
+            case $key in [Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]) filename_from_request "$val"; esac
+        fi
+        if [[ $TARGET_KEY == filesize ]]; then
+            case $key in *[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Ll][Ee][Nn][Gg][Tt][Hh]) REPLY=$val;; esac
+        fi
+        if [[ -n "$REPLY" ]]; then
+             RETVAL_key=$key
+             RETVAL_val=$REPLY
+             return 1 # stop reading
+        fi
+    }
+
+    process_url_headers() {
+        local headers=$1; shift
+        local process_kw=$1; shift
+    
+        process_url_request() {
+            local url=$1; shift
+            local process_kw=$1; shift
+            local addr=${url%%'?'*} kw
+            local args=${url#$addr}; args=${args#'?'} args=${args//'&'/ }
+            #printf "%s\n%s\n" "addr=$addr" "args=$args"
+            urldecode() { local x=${*//+/ }; printf -v REPLY "${x//%/\\x}"; }
+            for kw in $args; do
+                urldecode $kw; kw=$REPLY
+                local key=${kw%%=*}
+                local val=${kw#$key}; val=${val#=}
+                $process_kw "$key" "$val" || return
+            done
+            if [[ -z "$args" ]]; then
+               $process_kw "location" "$addr" || return
+            fi
+        }
+        while read -r; do
+            local key=${REPLY%%:*}
+            local val=${REPLY#$key}; val=${val#:}
+            trim_leading_spaces "$val"; val=$REPLY
+            REPLY=
+            case $key in
+                [Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn])
+                    process_url_request "$val" $process_kw || return 0;;
+                *) $process_kw "$key" "$val" || return 0;;
+            esac
+        done <<-EOF
+    		$headers
+EOF
+    }
+
+    process_url_headers "$headers" process_kw
+#    echo "[$RETVAL_key]=$RETVAL_val"
+    REPLY=$RETVAL_val
+}
+
 URL_info()
 {
 	local arg format=""
@@ -217,35 +287,26 @@ URL_info()
 	done
 
 	local url=$1
-	local headers dis src
+	local headers filename= filesize=
 	headers=$(URL_headers "$@")
+    # reverse list since we need latest headers first
+    headers=$(echo "$headers" | tac | tr -d $'\r')
 
-	if 		dis=$(echo "$headers" | grep -i 'Location:' | tail -n1) &&
-			filename_from_location_PRMS "$dis" && [[ -n "$REPLY" ]] && dis=$REPLY; then
-			src=PRM
-	elif 	dis=$(echo "$headers" | grep -i 'Content-Disposition:' | tail -n1) &&
-			filename_from_disposition "$dis" && [[ -n "$REPLY" ]] && dis=$REPLY; then
-			src=HDR
-	elif	filename_from_url "$url" && [[ -n "$REPLY" ]] && dis=$REPLY; then
-			src=url
-	elif	dis=$(echo "$headers" | grep -i 'Location:' | tail -n1) &&
-			filename_from_url "$dis" && [[ -n "$REPLY" ]] && dis=$REPLY; then
-			src=loc
-   	else
-			echo "error: can't detect filename for '$url'" 1>&2
-			return 1
-	fi
-
+    [[ -z "$filename" ]] && extract_value_from_headers "$headers" disposition && filename=$REPLY
+    [[ -z "$filename" ]] && extract_value_from_headers "$headers" location && filename=$REPLY
+	[[ -z "$filename" ]] && filename_from_url "$url" && filename=$REPLY
+    filename=${filename//\"/} # trim quotes
+    [[ -z "$filename" ]] && echo "error: can't detect filename for '$url'" 1>&2 && return 1
+    [[ -z "$filesize" ]] && extract_value_from_headers "$headers" filesize && filesize=$REPLY
 	local len
-	if ! len=$(echo "$headers" | grep -i 'Content-Length:' | tail -n1 | cut -s -d' ' -f2); then
+	if [[ -z "$filesize" ]]; then
 		headers=$(URL_headers_FORCE "$@")
-		if ! len=$(echo "$headers" | grep -i 'Content-Length:' | tail -n1 | cut -s -d' ' -f2); then
-			len=0
-		fi
+        headers=$(echo "$headers" | tac | tr [A-Z] [a-z])
+        extract_value_from_headers "$headers" filesize; filesize=$REPLY
 	fi
-    [[ -z "$headers" ]] && len=0
+    [[ -z "$filesize" ]] && filesize=0
 
-	local suff=B num=1
+	local len=$filesize suff=B num=1
 	[[ $len -ge       1000 ]] && suff="K" &&        num=1000
 	[[ $len -ge    1000000 ]] && suff="M" &&     num=1000000
 	[[ $len -ge 1000000000 ]] && suff="G" &&  num=1000000000
@@ -254,9 +315,9 @@ URL_info()
 	sz="$sz$suff"
 
 	if [[ -z "$format" ]]; then
-		echo "$len $dis $sz"
+		REPLY="$len $filename $sz"
 	else
-		printf "%6s %3s %s\n" "$sz" "$src" "$dis"
+		printf -v REPLY "%6s %s" "$sz" "$filename"
 	fi
 }
 

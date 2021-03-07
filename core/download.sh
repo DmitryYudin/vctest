@@ -208,7 +208,7 @@ request_url_info()
     print_console "%8s %-40s %s\r" "" "${url##*/}" "request info..."
 
     local info
-    info=$(URL_info "$url")
+    URL_info "$url"; info=$REPLY
 
     len=$(echo "$info" | cut -s -d' ' -f1)
     len_hr=$(echo "$info" | cut -s -d' ' -f3)
