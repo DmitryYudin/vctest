@@ -115,13 +115,20 @@ pipeOpen() # always from worker
         # so we try to overcome this issue with more careful approach.
         # Unfortunately, this does not help: We still observe lost and broken messages.
     	while ! exec 3>$pipeName; do
-	    	[[ ! -e $pipeName ]] && return 1
-            debug_log worker "can't open the pipe, sleep for a second"
+	    	if [[ ! -e $pipeName ]]; then
+                debug_log worker "error: can't open W-pipe, $pipeName does not exist"
+                return 1
+            fi
+            debug_log worker "warning: can't open the W-pipe, sleep for a second"
 		    sleep .1s
     	done
     else
     	while ! exec 3<$pipeName; do
-		    [[ ! -e $pipeName ]] && return 1
+	    	if [[ ! -e $pipeName ]]; then
+                debug_log worker "error: can't open R-pipe, $pipeName does not exist"
+                return 1
+            fi
+            debug_log worker "warning: can't open the R-pipe, sleep for a second"
 	    	sleep .1s
     	done
     fi
@@ -233,21 +240,25 @@ jobsStartWorker()
 
 	local runningTaskId=
 	local runningTaskCmd=
+    local workDone=
 	onWorkerExit() {
 		local error_code=0
 		[[ -n "$runningTaskId" ]] && error_code=1
+		[[ -n "$workDone" ]] && error_code=0
 
-        debug_log worker "Try exit with error_code=$error_code"
+        debug_log worker "exit: id=$runningTaskId workDone=$workDone error_code=$error_code"
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
         if ! pipeOpen "w" "$__jobsStatusPipe"; then
             echo "on_exit: can't report error status, pipe closed" >&2
-            debug_log worker "Status NOT reported"
+            debug_log worker "error: Status NOT reported"
         else
+            debug_log worker "onexit[submit]: $error_code"
 	    	echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" >&3
     		exec 3>&-;
-            debug_log worker "Status reported"
+            debug_log worker "onexit[------]: $error_code"
         fi
+        debug_log worker "Done"
 		exit $error_code
 	}
 	trap onWorkerExit EXIT
@@ -267,7 +278,9 @@ jobsStartWorker()
             debug_log worker "Status NOT reported"
             break
         else
+            debug_log worker "status[submit]: id=$id"
     		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" >&3
+            debug_log worker "status[------]: id=$id"
 	    	exec 3>&-;
         fi
 		runningTaskId=
@@ -278,6 +291,9 @@ jobsStartWorker()
             debug_log worker "workPipe closed"
             break
         else
+            # Multiple readers, single writer
+            flock 3
+
 	    	# do not break execution on read error
     		if ! readNewTask ':' <&3; then
 		    	REPLY=
@@ -285,7 +301,7 @@ jobsStartWorker()
     		exec 3>&-;
         fi
 
-		if [[ -z "$REPLY" ]]; then
+		if [[ "$REPLY" == "$REPLY_EOF" ]]; then
             debug_log worker "no more tasks"
 			break
 		fi
@@ -293,7 +309,9 @@ jobsStartWorker()
 		cmd=${REPLY#*$ARG_DELIM}
 	done
     debug_log worker "exit main loop"
-	trap - EXIT
+
+    workDone=1
+    exit 0
 }
 
 # unicode characters
@@ -403,10 +421,7 @@ readNewTask()
 		local x=$REPLY; x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}; REPLY=$x
 		case $REPLY in '#'*) continue;; esac # comment
 		[[ -z "$REPLY" ]] && continue
-		if [[ "$REPLY" == $REPLY_EOF ]]; then
-			REPLY=
-			return
-		fi
+		[[ "$REPLY" == $REPLY_EOF ]] && return
 
 		local id= cmd=$REPLY
 		if [[ -n "$delim" ]]; then
@@ -616,7 +631,6 @@ jobsRunTasks()
 	}
 
 	while : ; do
-		local pid # <- long live variable
 		# Until have workers running
 		while [[ $__jobsRunning != 0 ]]; do
 			jobsReportProgress
@@ -624,71 +638,83 @@ jobsRunTasks()
 			# Check feedback pipe still alived and not get destroyed on interrupt
 			[[ ! -e $__jobsStatusPipe ]] && break
 
-			# Only extract one message per pipe read access (i.e. not reading from 'fd' in a loop).
-			# This case we will have 'read' blocked till message appeared in a pipe.
-			# The return status is always expected to be zero with the exception for the interrupt.
-			read -r 2>/dev/null <$__jobsStatusPipe || continue
+            # Single reader, multiple writers
+            # https://unix.stackexchange.com/questions/450713/named-pipes-file-descriptors-and-eof/450715#450715
+            # https://stackoverflow.com/questions/8410439/how-to-avoid-echo-closing-fifo-named-pipes-funny-behavior-of-unix-fifos/8410538#8410538
+            set --
+            while read -r 2>/dev/null; do
+    			# This is a 'ping' - skip it
+    			case $REPLY in ping:*) continue; esac
 
-			# This is a 'ping' - skip it
-			case $REPLY in ping:*) continue; esac
-			debug_log master "statusUpdate: $REPLY"
+    			debug_log master "statusUpdate: $REPLY"
 
-			# This is a status report - parse it
-			local id status data x
-			x=$REPLY
-			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; pid=$x
-			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; id=$x  # maybe empty
-			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; status=$x
-			data=$x
-			if [[ -z "$id" ]]; then
-				setWorkerGone $pid; pid= # worker exit due to interrupt
-			else
-				debug_log master "jobsDone id=$id pid=$pid status=$status"
+    			local pid id status data x
+    			x=$REPLY
+    			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; pid=$x
+    			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; id=$x  # maybe empty
+    			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; status=$x
+    			data=$x
 
-				__jobsDone=$(( __jobsDone + 1 ))
-				if [[ "$status" != 0 ]]; then
-					setWorkerGone $pid; pid= # worker exit due to task fail
+                local needReply=
+    			if [[ -z "$id" ]]; then
+                    # Worker exit (maybe interrupted), we have nothing to do with completion status here
+                    setWorkerGone $pid 
+    			else
+    				debug_log master "jobsDone id=$id pid=$pid status=$status"
+    
+    				__jobsDone=$(( __jobsDone + 1 ))
+    				if [[ "$status" != 0 ]]; then
+    					setWorkerGone $pid; pid= # worker exit due to task fail
+    
+    					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
+    					jobsReportTaskFail "$id" $status "$data" >&2
+                    else
+                        needReply=1
+    				fi
+    			fi
+                [[ -z $needReply ]] && continue
 
-					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
-					jobsReportTaskFail "$id" $status "$data" >&2
-				fi
-			fi
-			[[ -n "$pid" ]] && break; # worker is waiting us a new task
+                set -- "$@" "$pid"
+   				debug_log master "enqueue message from pid=$pid, #$# [$@]"
+            done <$__jobsStatusPipe
+
+    		jobsReportProgress
+
+            [[ $# != 0 ]] && break # continue waiting message we need to reply
 		done
-		jobsReportProgress
+
+        debug_log master "#$# messages in queue, start reply"
 
 		# Time to leave if no workers alive
 		[[ $__jobsRunning == 0 ]] && break;
 
-		if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
-			readNewTask "$delim" <&4
-			[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1
-		else
-			REPLY=
-		fi
-		local id=${REPLY%$ARG_DELIM*}    # ok if empty id / cmd
-		local cmd=${REPLY#*$ARG_DELIM}   #
+        local dummy
+        for dummy; do
+	    	if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
+				readNewTask "$delim" <&4
+				[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1
+			else
+				REPLY=
+    		fi
+			local id=${REPLY%$ARG_DELIM*}    # ok if empty id / cmd
+			local cmd=${REPLY#*$ARG_DELIM}   #
 
-		local task;
-		# Reply with EOF message if no task was read
-		if [[ -z "$cmd" ]]; then
-			task=$REPLY_EOF
-			__jobsDisplay="no more tasks to schedule"
-		else
-			pid= # leave worker alive
-			[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
-			task=$id:$cmd
-			__jobsDisplay=$task${userFlags:+ $userFlags}
-		fi
-		jobsReportProgress
+			local task;
+			# Reply with EOF message if no task was read
+			if [[ -z "$cmd" ]]; then
+				task=$REPLY_EOF
+				__jobsDisplay="no more tasks to schedule"
+			else
+    			[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
+				task=$id:$cmd
+				__jobsDisplay=$task${userFlags:+ $userFlags}
+			fi
+			jobsReportProgress
 
-		debug_log master "newTask[submit]: $task"
-		echo "$task" 2>/dev/null >$__jobsWorkPipe
-		debug_log master "newTask[pushed]: $task"
-
-		if [[ -n "$pid" ]]; then
-			setWorkerGone $pid; pid=; # worker exit
-		fi
+			debug_log master "newTask[submit]: $task"
+    		echo "$task" 2>/dev/null >$__jobsWorkPipe
+			debug_log master "newTask[------]: $task"
+        done
 	done
 
 	trap - INT
