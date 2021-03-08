@@ -25,9 +25,21 @@ DIR_VEC=$(ospath "$dirScript/../vectors")
 INPUT=
 ADDR=
 readonly DIR_CACHE=$DIR_VEC/cache
-readonly SevenZipExe=$DIR_BIN/7z
-readonly ffmpegExe=$DIR_BIN/ffmpeg
-readonly ffprobeExe=$DIR_BIN/ffprobe
+case ${OS:-} in 
+    *_NT) 
+        readonly SevenZipExe=$DIR_BIN/7z
+        readonly ffmpegExe=$DIR_BIN/ffmpeg
+        readonly ffprobeExe=$DIR_BIN/ffprobe
+    ;;
+    *)
+        readonly SevenZipExe=7z        # apt install p7zip-full
+        readonly ffmpegExe=ffmpeg      # apt install ffmpeg
+        readonly ffprobeExe=ffprobe
+        command -p -v $SevenZipExe &>/dev/null || error_exit "7z not found -> 'apt install p7zip-full'"
+        command -p -v $ffmpegExe &>/dev/null || error_exit "ffmpeg not found -> 'apt install ffmpeg'"
+        command -p -v $ffprobeExe &>/dev/null || error_exit "ffprobe not found -> 'apt install ffmpeg'"
+    ;;
+esac
 
 readonly DB_STATUS=0
 readonly DB_LEN=1
@@ -417,8 +429,13 @@ install_from_cache()
                 $SevenZipExe x -y "$src" -o"$dst" >/dev/null
             ;;
             appencoder)
-                dst="$DIR_BIN/android/kingsoft"
+                case $url in
+                    */android_arm64/*) dst="$DIR_BIN/android/kingsoft";;
+                    */ubuntu_x64/*) dst="$DIR_BIN/linux-intel/kingsoft";;
+                    *) error_exit "unknown ks encoder $url"
+                esac
                 make_link "$dst" "$src"
+                chmod +777 "$dst"
             ;;
             Win64-Release.zip)
                 dst="$DIR_BIN/windows/kvazaar"

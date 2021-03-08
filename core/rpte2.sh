@@ -681,8 +681,10 @@ jobsRunTasks()
 			__jobsDisplay=$task${userFlags:+ $userFlags}
 		fi
 		jobsReportProgress
+
+		debug_log master "newTask[submit]: $task"
 		echo "$task" 2>/dev/null >$__jobsWorkPipe
-		debug_log master "newTask: $task"
+		debug_log master "newTask[pushed]: $task"
 
 		if [[ -n "$pid" ]]; then
 			setWorkerGone $pid; pid=; # worker exit

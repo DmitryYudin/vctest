@@ -25,8 +25,16 @@ DIR_VEC=$(ospath "$dirScript"/../vectors)
 NCPU=0
 TRACE_HM=0
 ENABLE_CPU_MONITOR=0
-readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
-readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
+case ${OS:-} in 
+    *_NT) 
+        readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
+        readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
+    ;;
+    *)
+        readonly ffmpegExe=ffmpeg
+        readonly ffprobeExe=ffprobe
+    ;;
+esac
 readonly timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 readonly dirTmp=$(tempdir)/vctest/$timestamp
 readonly statExe=$dirScript/../'bin/TAppDecoder.exe'
@@ -117,7 +125,11 @@ entrypoint()
     # Currently only used by bd-rate script
     REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
 
-	target=${target:-windows}
+    case ${OS:-} in
+        *_NT) target=${target:-windows};;
+        *) target=${target:-linux};;
+    esac
+
 	PRESETS=${PRESETS:--}
 	# for multithreaded run, run in single process to get valid cpu usage estimation
 	[[ $THREADS -gt 1 ]] && NCPU=1

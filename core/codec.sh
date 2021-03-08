@@ -42,6 +42,8 @@ android_vpx=android/vpx/vpxenc
 android_vp8=$android_vpx
 android_vp9=$android_vpx
 
+linux_intel_kingsoft=linux-intel/kingsoft/appencoder
+
 linux_arm_h265demo=linux-arm/hw265/h265demo
 linux_arm_h265demo_v2=linux-arm/hw265_v2/hw265app
 linux_arm_h265demo_v3=linux-arm/hw265_v3/hw265app
@@ -352,6 +354,7 @@ cmd_kvazaar()
 
 exe_kingsoft() { REPLY=;
 				 [[ $1 == windows ]] && REPLY=$windows_kingsoft;
+				 [[ $1 == linux   ]] && REPLY=$linux_intel_kingsoft;
 				 [[ $1 == adb     ]] && REPLY=$android_kingsoft;
 				 return 0;
 }
