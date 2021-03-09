@@ -123,7 +123,9 @@ pipeOpen() # always from worker
 		    sleep .1s
     	done
     else
+OpeningPipeR=1
     	while ! exec 3<$pipeName; do
+OpeningPipeR=2
 	    	if [[ ! -e $pipeName ]]; then
                 debug_log worker "error: can't open R-pipe, $pipeName does not exist"
                 return 1
@@ -131,6 +133,7 @@ pipeOpen() # always from worker
             debug_log worker "warning: can't open the R-pipe, sleep for a second"
 	    	sleep .1s
     	done
+OpeningPipeR=0
     fi
     return 0
 }
@@ -240,6 +243,7 @@ jobsStartWorker()
 
 	local runningTaskId=
 	local runningTaskCmd=
+local OpeningPipeR=0
     local workDone=
 	onWorkerExit() {
 		local error_code=0
@@ -247,6 +251,7 @@ jobsStartWorker()
 		[[ -n "$workDone" ]] && error_code=0
 
         debug_log worker "exit: id=$runningTaskId workDone=$workDone error_code=$error_code"
+        debug_log worker "OpeningPipeR=$OpeningPipeR"
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
         if ! pipeOpen "w" "$__jobsStatusPipe"; then
@@ -292,12 +297,13 @@ jobsStartWorker()
             break
         else
             # Multiple readers, single writer
-            flock 3
+            #flock --verbose 3 >&2
 
 	    	# do not break execution on read error
     		if ! readNewTask ':' <&3; then
 		    	REPLY=
 	    	fi
+            #flock --verbose -u 3 >&2
     		exec 3>&-;
         fi
 
