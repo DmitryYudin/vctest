@@ -68,14 +68,15 @@ entrypoint()
 		jobsRunTasks "$@"
 		jobsGetStatus || return 1
 	else
-        local i=0
+        local i=0 N=20000
         rm -f tasks.txt
-        while [[ $i -lt 20 ]]; do
+		rm -rf tmp
+        echo "Scheduling $N tasks..."
+        while [[ $i -lt $N ]]; do
             i=$((i+1))
     		echo true >> tasks.txt
         done
-
-		jobsRunTasks tasks.txt -j2 -p tmp
+		jobsRunTasks tasks.txt -j20 -p tmp
 		jobsGetStatus || { echo "Complete with error" && return 1; }
 		echo "Success"
 	fi
@@ -114,14 +115,22 @@ pipeOpen() # always from worker
         # so we try to overcome this issue with more careful approach.
         # Unfortunately, this does not help: We still observe lost and broken messages.
     	while ! exec 3>$pipeName; do
-	    	[[ ! -e $pipeName ]] && return 1
-            debug_log worker "can't open the pipe, sleep for a second"
+	    	if [[ ! -e $pipeName ]]; then
+                debug_log worker "error: can't open W-pipe, $pipeName does not exist"
+                return 1
+            fi
+            debug_log worker "warning: can't open the W-pipe, sleep for a second"
 		    sleep .1s
     	done
     else
 OpeningPipeR=1
     	while ! exec 3<$pipeName; do
-		    [[ ! -e $pipeName ]] && return 1
+OpeningPipeR=2
+	    	if [[ ! -e $pipeName ]]; then
+                debug_log worker "error: can't open R-pipe, $pipeName does not exist"
+                return 1
+            fi
+            debug_log worker "warning: can't open the R-pipe, sleep for a second"
 	    	sleep .1s
     	done
 OpeningPipeR=0
@@ -224,7 +233,7 @@ jobsStartWorker()
 {
 	[[ $ENABLE_NAMED_PIPE != 1 ]] && return 1
 
-	local -
+#	local -
 	set -eu
 
 	local id=$1; shift
@@ -236,6 +245,9 @@ jobsStartWorker()
 	local runningTaskCmd=
 local OpeningPipeR=0
     local workDone=
+
+exec 8<$__jobsWorkPipe
+exec 9>${__jobsWorkPipe}.lock
 	onWorkerExit() {
 		local error_code=0
 		[[ -n "$runningTaskId" ]] && error_code=1
@@ -283,30 +295,24 @@ local OpeningPipeR=0
 		runningTaskCmd=
 
 		# Open for reading (prevent 'Device or resource busy' error)
-#        flock $__jobsWorkPipe
-        if ! pipeOpen "r" "$__jobsWorkPipe"; then
-            debug_log worker "workPipe closed"
-            break
-        else
-            # Multiple readers, single writer
-#            flock --verbose 3 echo hello >&2
-#            flock --verbose 3 echo 
-flock -F 3
-
-	    	# do not break execution on read error
-    		if ! readNewTask ':' <&3; then
-		    	REPLY=
-	    	fi
-            #flock --verbose -u 3 >&2
-    		exec 3>&-;
-        fi
-
+#        flock $__jobsWorkPipe -c true >&2
+REPLY=
+#echo lock
+#		flock lock.file -c true
+        flock 9
+#echo lock-
+		while [[ -z "$REPLY" ]]; do
+    		readNewTask ':' <&8 || true
+		done
+		flock -u 9
 		if [[ "$REPLY" == "$REPLY_EOF" ]]; then
             debug_log worker "no more tasks"
 			break
 		fi
 		id=${REPLY%$ARG_DELIM*}
 		cmd=${REPLY#*$ARG_DELIM}
+		debug_log worker "workPipe id=$REPLY"
+
 	done
     debug_log worker "exit main loop"
 
@@ -629,7 +635,7 @@ jobsRunTasks()
 
 		debug_log master "setWorkerGone pid=$pid [onchain $__jobsPid]"
 	}
-
+exec 8>$__jobsWorkPipe
 	while : ; do
 		# Until have workers running
 		while [[ $__jobsRunning != 0 ]]; do
@@ -712,7 +718,8 @@ jobsRunTasks()
 			jobsReportProgress
 
 			debug_log master "newTask[submit]: $task"
-    		echo "$task" 2>/dev/null >$__jobsWorkPipe
+#    		echo "$task" 2>/dev/null >$__jobsWorkPipe
+    		echo "$task" >&8
 			debug_log master "newTask[------]: $task"
         done
 	done
