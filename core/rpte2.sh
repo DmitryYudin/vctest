@@ -69,7 +69,7 @@ entrypoint()
 		jobsRunTasks "$@"
 		jobsGetStatus || return 1
 	else
-        local i=0 N=2000
+        local i=0 N=20
         rm -f tasks.txt
 		rm -rf tmp
         echo "Scheduling $((N*10)) tasks..."
@@ -101,12 +101,20 @@ jobsStartPing()
 	local period=$1
 	{
 		trap 'return 0' INT
-		while echo "ping::0:" > $__jobsStatusPipe ; do
-			sleep $period			
-		done
+
+        exec 40>${__jobsStatusPipe}.lock
+        while [[ -e $__jobsStatusPipe ]]; do
+            flock 40
+            echo "ping::0:" > $__jobsStatusPipe
+            flock -u 40
+			sleep $period
+        done
 	} </dev/null 1>/dev/null 2>/dev/null &
 }
 
+MASTER=0
+WORKER=1
+#mq_create
 #
 # Execute single task with output streams redirected to $tempPath/$id.stream.log
 # Set exist status to task execution status.
@@ -205,8 +213,9 @@ jobsStartWorker()
 local OpeningPipeR=0
     local workDone=
 
-exec 8<$__jobsWorkPipe
-exec 9>${__jobsWorkPipe}.lock
+exec 30>${__jobsWorkPipe}.lock
+exec 40>${__jobsStatusPipe}.lock
+
 	onWorkerExit() {
 		local error_code=0
 		[[ -n "$runningTaskId" ]] && error_code=1
@@ -216,11 +225,10 @@ exec 9>${__jobsWorkPipe}.lock
         debug_log worker "OpeningPipeR=$OpeningPipeR"
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        exec 3>$__jobsStatusPipe
         debug_log worker "onexit[submit]: $error_code"
-        flock 3
-        echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" >&3
-    	exec 3>&-;
+        flock 40
+        echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" > $__jobsStatusPipe
+        flock -u 40
         debug_log worker "onexit[------]: $error_code"
 
         debug_log worker "Done"
@@ -238,22 +246,21 @@ exec 9>${__jobsWorkPipe}.lock
 
 		# Report successful status since exit trap is expected to trig on failure
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        exec 3>$__jobsStatusPipe
         debug_log worker "status[submit]: id=$id"
-        flock 3
-   		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" >&3
+        flock 40
+   		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" > $__jobsStatusPipe
+flock -u 40
         debug_log worker "status[------]: id=$id"
-    	exec 3>&-;
 
 		runningTaskId=
 		runningTaskCmd=
 
 REPLY=
-        flock 9
+        flock 30
 		while [[ -z "$REPLY" ]]; do
-    		readNewTask ':' <&8 || true
+    		readNewTask ':' <$__jobsWorkPipe || true
 		done
-		flock -u 9
+		flock -u 30
 		if [[ "$REPLY" == "$REPLY_EOF" ]]; then
             debug_log worker "no more tasks"
 			break
@@ -538,8 +545,13 @@ jobsRunTasks()
 		{ jobsReportProgress; echo ""; }
 	}
 
-	readonly __jobsStatusPipe="$tempPath/pipe_status.$$"
-	readonly __jobsWorkPipe="$tempPath/pipe_work.$$"
+#	readonly __jobsStatusPipe="$tempPath/pipe_status.$$"
+#	readonly __jobsWorkPipe="$tempPath/pipe_work.$$"
+    local tempVar=/tmp/vctest
+    mkdir -p $tempVar
+	readonly __jobsStatusPipe="$tempVar/pipe_status.$$"
+	readonly __jobsWorkPipe="$tempVar/pipe_work.$$"
+
 	__jobsPid=
 
 	rm -f -- $__jobsStatusPipe $__jobsWorkPipe
@@ -584,7 +596,7 @@ jobsRunTasks()
 
 		debug_log master "setWorkerGone pid=$pid [onchain $__jobsPid]"
 	}
-exec 8>$__jobsWorkPipe
+
 	while : ; do
 		# Until have workers running
 		while [[ $__jobsRunning != 0 ]]; do
@@ -631,8 +643,9 @@ exec 8>$__jobsWorkPipe
 
                 set -- "$@" "$pid"
    				debug_log master "enqueue message from pid=$pid, #$# [$@]"
-            done <$__jobsStatusPipe
-
+#break
+#            done <&5
+done <$__jobsStatusPipe
     		jobsReportProgress
 
             [[ $# != 0 ]] && break # continue waiting message we need to reply
@@ -667,8 +680,8 @@ exec 8>$__jobsWorkPipe
 			jobsReportProgress
 
 			debug_log master "newTask[submit]: $task"
-#    		echo "$task" 2>/dev/null >$__jobsWorkPipe
-    		echo "$task" >&8
+    		echo "$task" 2>/dev/null >$__jobsWorkPipe
+#    		echo "$task" >&8
 			debug_log master "newTask[------]: $task"
         done
 	done
