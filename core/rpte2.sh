@@ -53,6 +53,7 @@ entrypoint()
 	[[ -n "${KSH_VERSION:-}" ]]     && ENABLE_NAMED_PIPE=0 # not supported (Android shell)
 	[[ -n "${WSL_DISTRO_NAME:-}" ]] && ENABLE_NAMED_PIPE=0 # broken
 	readonly ENABLE_NAMED_PIPE
+    [[ $ENABLE_NAMED_PIPE == 0 ]] && echo "warning: multithreading execution disabled"
 
 	local do_test=false
 	for arg do
@@ -103,39 +104,6 @@ jobsStartPing()
 			sleep $period			
 		done
 	} </dev/null 1>/dev/null 2>/dev/null &
-}
-
-pipeOpen() # always from worker
-{
-    local mode=$1; shift
-    local pipeName=$1; shift
-    if [[ $mode == w ]]; then
-        # Normally we need not open pipe manually when writing since bash should block write access till pipe is available.
-        # It looks like named pipes are not workable for WSL, WSL2 and broken for MSYS2 starting from rel 20200522,
-        # so we try to overcome this issue with more careful approach.
-        # Unfortunately, this does not help: We still observe lost and broken messages.
-    	while ! exec 3>$pipeName; do
-	    	if [[ ! -e $pipeName ]]; then
-                debug_log worker "error: can't open W-pipe, $pipeName does not exist"
-                return 1
-            fi
-            debug_log worker "warning: can't open the W-pipe, sleep for a second"
-		    sleep .1s
-    	done
-    else
-OpeningPipeR=1
-    	while ! exec 3<$pipeName; do
-OpeningPipeR=2
-	    	if [[ ! -e $pipeName ]]; then
-                debug_log worker "error: can't open R-pipe, $pipeName does not exist"
-                return 1
-            fi
-            debug_log worker "warning: can't open the R-pipe, sleep for a second"
-	    	sleep .1s
-    	done
-OpeningPipeR=0
-    fi
-    return 0
 }
 
 #
@@ -209,25 +177,15 @@ executeSingleTask()
 # variable.
 debug_log_init()
 {
-    local type=$1; shift
-    local logfile=
-    if [[ $type == worker ]]; then
-    	logfile=$tempPath/$BASHPID.worker.log
-    else
-    	logfile=$tempPath/master.log
-    fi
-	rm -f "$logfile"
+    local type=$1 logfile=
+    [[ $type == worker ]] && logfile=worker.$BASHPID.log || logfile=master.log
+	rm -f "$tempPath/$logfile"
 }
 debug_log()
 {
-    local type=$1; shift
-    local logfile=
-    if [[ $type == worker ]]; then
-    	logfile=$tempPath/$BASHPID.worker.log
-    else
-    	logfile=$tempPath/master.log
-    fi
-    echo "$@" >> $logfile
+    local type=$1 logfile=
+    [[ $type == worker ]] && logfile=worker.$BASHPID.log || logfile=master.log
+    echo "$@" >> $tempPath/$logfile
 }
 jobsStartWorker()
 {
@@ -257,15 +215,12 @@ exec 9>${__jobsWorkPipe}.lock
         debug_log worker "OpeningPipeR=$OpeningPipeR"
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        if ! pipeOpen "w" "$__jobsStatusPipe"; then
-            echo "on_exit: can't report error status, pipe closed" >&2
-            debug_log worker "error: Status NOT reported"
-        else
-            debug_log worker "onexit[submit]: $error_code"
-	    	echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" >&3
-    		exec 3>&-;
-            debug_log worker "onexit[------]: $error_code"
-        fi
+        exec 3>$__jobsStatusPipe
+        debug_log worker "onexit[submit]: $error_code"
+        echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" >&3
+    	exec 3>&-;
+        debug_log worker "onexit[------]: $error_code"
+
         debug_log worker "Done"
 		exit $error_code
 	}
@@ -281,16 +236,12 @@ exec 9>${__jobsWorkPipe}.lock
 
 		# Report successful status since exit trap is expected to trig on failure
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        if ! pipeOpen "w" "$__jobsStatusPipe"; then
-			echo "main_loop: can't report success status, pipe closed" >&2
-            debug_log worker "Status NOT reported"
-            break
-        else
-            debug_log worker "status[submit]: id=$id"
-    		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" >&3
-            debug_log worker "status[------]: id=$id"
-	    	exec 3>&-;
-        fi
+        exec 3>$__jobsStatusPipe
+        debug_log worker "status[submit]: id=$id"
+   		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" >&3
+        debug_log worker "status[------]: id=$id"
+    	exec 3>&-;
+
 		runningTaskId=
 		runningTaskCmd=
 
