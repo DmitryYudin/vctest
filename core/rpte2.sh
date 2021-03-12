@@ -114,22 +114,14 @@ pipeOpen() # always from worker
         # so we try to overcome this issue with more careful approach.
         # Unfortunately, this does not help: We still observe lost and broken messages.
     	while ! exec 3>$pipeName; do
-	    	if [[ ! -e $pipeName ]]; then
-                debug_log worker "error: can't open W-pipe, $pipeName does not exist"
-                return 1
-            fi
-            debug_log worker "warning: can't open the W-pipe, sleep for a second"
+	    	[[ ! -e $pipeName ]] && return 1
+            debug_log worker "can't open the pipe, sleep for a second"
 		    sleep .1s
     	done
     else
 OpeningPipeR=1
     	while ! exec 3<$pipeName; do
-OpeningPipeR=2
-	    	if [[ ! -e $pipeName ]]; then
-                debug_log worker "error: can't open R-pipe, $pipeName does not exist"
-                return 1
-            fi
-            debug_log worker "warning: can't open the R-pipe, sleep for a second"
+		    [[ ! -e $pipeName ]] && return 1
 	    	sleep .1s
     	done
 OpeningPipeR=0
@@ -291,12 +283,15 @@ local OpeningPipeR=0
 		runningTaskCmd=
 
 		# Open for reading (prevent 'Device or resource busy' error)
+#        flock $__jobsWorkPipe
         if ! pipeOpen "r" "$__jobsWorkPipe"; then
             debug_log worker "workPipe closed"
             break
         else
             # Multiple readers, single writer
-            #flock --verbose 3 >&2
+#            flock --verbose 3 echo hello >&2
+#            flock --verbose 3 echo 
+flock -F 3
 
 	    	# do not break execution on read error
     		if ! readNewTask ':' <&3; then
@@ -447,7 +442,7 @@ readNewTask()
 
 jobsRunTasks()
 {
-	local -
+#	local -
 	set -eu
 
 	local taskTxt= delim= tempPath=. logLevel= runMax=1 userText= userFlags=
