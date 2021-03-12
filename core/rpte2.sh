@@ -68,14 +68,13 @@ entrypoint()
 		jobsRunTasks "$@"
 		jobsGetStatus || return 1
 	else
-		cat <<-'EOF' > tasks.txt
-			echo hello1
-			#false
-			echo hello2
-			true
-			ping localhost
-			#false
-		EOF
+        local i=0
+        rm -f tasks.txt
+        while [[ $i -lt 20 ]]; do
+            i=$((i+1))
+    		echo true >> tasks.txt
+        done
+
 		jobsRunTasks tasks.txt -j2 -p tmp
 		jobsGetStatus || { echo "Complete with error" && return 1; }
 		echo "Success"
