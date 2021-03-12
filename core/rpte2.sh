@@ -69,14 +69,15 @@ entrypoint()
 		jobsRunTasks "$@"
 		jobsGetStatus || return 1
 	else
-        local i=0 N=20000
+        local i=0 N=2000
         rm -f tasks.txt
 		rm -rf tmp
-        echo "Scheduling $N tasks..."
+        echo "Scheduling $((N*10)) tasks..."
+        printf -v REPLY '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' true true true true true true true true true true;
         while [[ $i -lt $N ]]; do
             i=$((i+1))
-    		echo true >> tasks.txt
-        done
+            echo "$REPLY"
+        done >> tasks.txt
 		jobsRunTasks tasks.txt -j20 -p tmp
 		jobsGetStatus || { echo "Complete with error" && return 1; }
 		echo "Success"
@@ -217,6 +218,7 @@ exec 9>${__jobsWorkPipe}.lock
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
         exec 3>$__jobsStatusPipe
         debug_log worker "onexit[submit]: $error_code"
+        flock 3
         echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" >&3
     	exec 3>&-;
         debug_log worker "onexit[------]: $error_code"
@@ -238,6 +240,7 @@ exec 9>${__jobsWorkPipe}.lock
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
         exec 3>$__jobsStatusPipe
         debug_log worker "status[submit]: id=$id"
+        flock 3
    		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" >&3
         debug_log worker "status[------]: id=$id"
     	exec 3>&-;
@@ -245,13 +248,8 @@ exec 9>${__jobsWorkPipe}.lock
 		runningTaskId=
 		runningTaskCmd=
 
-		# Open for reading (prevent 'Device or resource busy' error)
-#        flock $__jobsWorkPipe -c true >&2
 REPLY=
-#echo lock
-#		flock lock.file -c true
         flock 9
-#echo lock-
 		while [[ -z "$REPLY" ]]; do
     		readNewTask ':' <&8 || true
 		done
