@@ -286,10 +286,9 @@ exec 9>${__jobsStatusPipe}.lock_w;
         debug_log worker "wp lock"
         workpipe_lock_r
         debug_log worker "wp reading"
+		# read everthing from pipe to get no messages lost
         set --
-		while [[ $# == 0 ]]; do
         while read -r; do set -- "$@" "$REPLY"; done <$__jobsWorkPipe
-done
         debug_log worker "wp unlock #$#: $@"
 		workpipe_unlock_r
 
@@ -297,11 +296,13 @@ done
         shift
 
         if [[ $# -gt 0 ]]; then
-            debug_log worker "push tasks back #$#"
+            debug_log worker "push tasks back #$#: $@"
             workpipe_lock_w
-            for REPLY in; do
-	            debug_log worker "------------------------ back: $REPLY"
-				echo "$REPLY" >$__jobsWorkPipe
+			local msg
+            for msg; do
+	            debug_log worker "------------------------ back: $msg"
+echo "back" >> back.txt
+				echo "$msg" >$__jobsWorkPipe
 			done
             workpipe_unlock_w
         fi
@@ -604,9 +605,6 @@ echo "" > ${__jobsWorkPipe}.lock_r;
 echo "" > ${__jobsWorkPipe}.lock_w;
 echo "" > ${__jobsStatusPipe}.lock_w; 
 
-exec 7>${__jobsWorkPipe}.lock_r; 
-exec 8>${__jobsWorkPipe}.lock_w;
-exec 9>${__jobsStatusPipe}.lock_w; 
 
 	exec 4<"$taskTxt" # hard-coded fd
 	while [ $__jobsRunning -lt $runMax ]; do
@@ -639,6 +637,11 @@ exec 9>${__jobsStatusPipe}.lock_w;
 
 		debug_log master "setWorkerGone pid=$pid [onchain $__jobsPid]"
 	}
+
+exec 7>${__jobsWorkPipe}.lock_r; 
+exec 8>${__jobsWorkPipe}.lock_w;
+exec 9<${__jobsStatusPipe}
+
     local id_done=0
 	while : ; do
 		# Until have workers running
@@ -652,7 +655,7 @@ exec 9>${__jobsStatusPipe}.lock_w;
             # https://unix.stackexchange.com/questions/450713/named-pipes-file-descriptors-and-eof/450715#450715
             # https://stackoverflow.com/questions/8410439/how-to-avoid-echo-closing-fifo-named-pipes-funny-behavior-of-unix-fifos/8410538#8410538
             set --
-            while read; do
+            while read -r; do
     			# This is a 'ping' - skip it
     			case $REPLY in ping:*) continue; esac
 
@@ -682,11 +685,14 @@ exec 9>${__jobsStatusPipe}.lock_w;
                         needReply=1
     				fi
     			fi
-                [[ -z $needReply ]] && continue
-
-                set -- "$@" "$pid"
-   				debug_log master "enqueue message from pid=$pid, #$# [$@]"
-            done <$__jobsStatusPipe
+				[[ $__jobsRunning == 0 ]] && break
+                if [[ -n $needReply ]]; then
+                    set -- "$@" "$pid"
+   	    			debug_log master "enqueue message from pid=$pid, #$# [$@]"
+                fi
+#                break
+#            done <$__jobsStatusPipe
+            done <&9
     		jobsReportProgress
 
             [[ $# != 0 ]] && break # continue waiting message we need to reply
