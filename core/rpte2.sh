@@ -196,12 +196,11 @@ debug_log()
     echo "$@" >> $tempPath/$logfile
 }
 
-workpipe_lock() { exec 8>${__jobsWorkPipe}.lock; flock 8; }
+workpipe_lock_r() { exec 8>${__jobsWorkPipe}.lock_r; flock 8; }
+workpipe_lock_w() { exec 8>${__jobsWorkPipe}.lock_w; flock 8; }
 workpipe_unlock() { flock -u 8; exec 8<&-; }
-statuspipe_lock() { exec 8>${__jobsStatusPipe}.lock; flock 8; }
+statuspipe_lock() { exec 8>${__jobsStatusPipe}.lock_w; flock 8; }
 statuspipe_unlock() { flock -u 8; exec 8<&-; }
-workpipe_lock_master() { exec 9>${__jobsWorkPipe}.lock2; flock 9; }
-workpipe_unlock_master() { flock -u 9; exec 9<&-; }
 
 jobsStartWorker()
 {
@@ -238,54 +237,56 @@ jobsStartWorker()
 	}
 	trap onWorkerExit EXIT
 
-	set -- "$id$ARG_DELIM$cmd"
+	local task=$id$ARG_DELIM$cmd
 	# Continue reading while pipe exist
 	local no_more_tasks=
 	while : ; do
-		for REPLY; do
+		local id=${task%$ARG_DELIM*}
+		local cmd=${task#*$ARG_DELIM}
 
-			shift
+		if [[ "$cmd" == "$REPLY_EOF" ]]; then
+			no_more_tasks=1
+        	debug_log worker "no more tasks: $cmd"
+			break
+		fi
+		debug_log worker "workPipe id=$REPLY"
 
-			local id=${REPLY%$ARG_DELIM*}
-			local cmd=${REPLY#*$ARG_DELIM}
+		runningTaskId=$id
+		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
 
-			if [[ "$cmd" == "$REPLY_EOF" ]]; then
-				no_more_tasks=1
-            	debug_log worker "no more tasks: $cmd"
-				break
-			fi
-			debug_log worker "workPipe id=$REPLY"
+    	debug_log worker "Exec: id=$id cmd=[$cmd]"
+       	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
 
-			runningTaskId=$id
-			runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
+		# Report successful status since exit trap is expected to trig on failure
+		# open pipe first to avoid 'echo: write error: Broken pipe' message
+        debug_log worker "status[submit]: id=$id"
+	    statuspipe_lock
+		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" > $__jobsStatusPipe
+		statuspipe_unlock
+	    debug_log worker "status[------]: id=$id"
 
-        	debug_log worker "Exec: id=$id cmd=[$cmd]"
-	       	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
-
-			# Report successful status since exit trap is expected to trig on failure
-			# open pipe first to avoid 'echo: write error: Broken pipe' message
-	        debug_log worker "status[submit]: id=$id"
-    	    statuspipe_lock
-   			echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" > $__jobsStatusPipe
-			statuspipe_unlock
-    	    debug_log worker "status[------]: id=$id"
-
-			runningTaskId=
-			runningTaskCmd=
-		done
+		runningTaskId=
+		runningTaskCmd=
 
 		[[ -n $no_more_tasks ]] && break
 
         debug_log worker "wp lock"
-        workpipe_lock
+        workpipe_lock_r
         debug_log worker "wp reading"
         set --
-        while read -r 2>/dev/null; do
-			set -- "$@" "$REPLY"
-		done <$__jobsWorkPipe
-
+        while read -r 2>/dev/null; do set -- "$@" "$REPLY"; done <$__jobsWorkPipe
         debug_log worker "wp unlock #$#: $@"
 		workpipe_unlock
+
+        task=$1
+        shift
+
+        if [[ $# -gt 0 ]]; then
+            debug_log worker "push tasks back #$#"
+            workpipe_lock_w
+            for REPLY in; do echo "$task_id$ARG_DELIM$task_cmd" >$__jobsWorkPipe; done
+            workpipe_unlock
+        fi
 	done
     debug_log worker "exit main loop #$#: $@"
 
@@ -699,7 +700,9 @@ jobsRunTasks()
 			jobsReportProgress
 
 			debug_log master "newTask[submit]: $task"
+workpipe_lock_w
     		echo "$task_id$ARG_DELIM$task_cmd" >$__jobsWorkPipe
+workpipe_unlock
 			debug_log master "newTask[------]: $task"
 #sleep .1s
         done
