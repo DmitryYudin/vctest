@@ -274,7 +274,10 @@ exec 9>${__jobsStatusPipe}.lock_w;
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
         debug_log worker "status[submit]: id=$id"
 	    statuspipe_lock
-		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" > $__jobsStatusPipe
+		while ! echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" > $__jobsStatusPipe; do
+            echo "$__jobsStatusPipe" >> gone.txt
+:
+        done
 		statuspipe_unlock
 	    debug_log worker "status[------]: id=$id"
 
