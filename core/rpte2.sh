@@ -102,6 +102,8 @@ jobsStartPing()
 	{
 		trap 'return 0' INT
 
+		exec 9>${__jobsStatusPipe}.lock_w; 
+
         while [[ -e $__jobsStatusPipe ]]; do
 statuspipe_lock
             echo "ping::0:" > $__jobsStatusPipe
@@ -196,11 +198,19 @@ debug_log()
     echo "$@" >> $tempPath/$logfile
 }
 
-workpipe_lock_r() { exec 8>${__jobsWorkPipe}.lock_r; flock 8; }
-workpipe_lock_w() { exec 8>${__jobsWorkPipe}.lock_w; flock 8; }
-workpipe_unlock() { flock -u 8; exec 8<&-; }
-statuspipe_lock() { exec 8>${__jobsStatusPipe}.lock_w; flock 8; }
-statuspipe_unlock() { flock -u 8; exec 8<&-; }
+#workpipe_lock_r() { exec 8>${__jobsWorkPipe}.lock_r; flock 8; }
+#workpipe_lock_w() { exec 8>${__jobsWorkPipe}.lock_w; flock 8; }
+#workpipe_unlock_r() { flock -u 8; exec 8<&-; }
+#workpipe_unlock_w() { flock -u 8; exec 8<&-; }
+#statuspipe_lock() { exec 8>${__jobsStatusPipe}.lock_w; flock 8; }
+#statuspipe_unlock() { flock -u 8; exec 8<&-; }
+
+workpipe_lock_r() { flock 7; }
+workpipe_lock_w() { flock 8; }
+statuspipe_lock() { flock 9; }
+workpipe_unlock_r() { flock -u 7; }
+workpipe_unlock_w() { flock -u 8; }
+statuspipe_unlock() { flock -u 9; }
 
 jobsStartWorker()
 {
@@ -217,6 +227,10 @@ jobsStartWorker()
 	local runningTaskId=
 	local runningTaskCmd=
     local workDone=
+
+exec 7>${__jobsWorkPipe}.lock_r; 
+exec 8>${__jobsWorkPipe}.lock_w;
+exec 9>${__jobsStatusPipe}.lock_w; 
 
 	onWorkerExit() {
 		local error_code=0
@@ -249,7 +263,6 @@ jobsStartWorker()
         	debug_log worker "no more tasks: $cmd"
 			break
 		fi
-		debug_log worker "workPipe id=$REPLY"
 
 		runningTaskId=$id
 		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
@@ -274,9 +287,11 @@ jobsStartWorker()
         workpipe_lock_r
         debug_log worker "wp reading"
         set --
-        while read -r 2>/dev/null; do set -- "$@" "$REPLY"; done <$__jobsWorkPipe
+		while [[ $# == 0 ]]; do
+        while read -r; do set -- "$@" "$REPLY"; done <$__jobsWorkPipe
+done
         debug_log worker "wp unlock #$#: $@"
-		workpipe_unlock
+		workpipe_unlock_r
 
         task=$1
         shift
@@ -284,8 +299,11 @@ jobsStartWorker()
         if [[ $# -gt 0 ]]; then
             debug_log worker "push tasks back #$#"
             workpipe_lock_w
-            for REPLY in; do echo "$task_id$ARG_DELIM$task_cmd" >$__jobsWorkPipe; done
-            workpipe_unlock
+            for REPLY in; do
+	            debug_log worker "------------------------ back: $REPLY"
+				echo "$REPLY" >$__jobsWorkPipe
+			done
+            workpipe_unlock_w
         fi
 	done
     debug_log worker "exit main loop #$#: $@"
@@ -582,8 +600,15 @@ jobsRunTasks()
 	trap 'jobsOnINT' INT
 	trap 'jobsOnEXIT' EXIT
 
-	exec 4<"$taskTxt" # hard-coded fd
+echo "" > ${__jobsWorkPipe}.lock_r; 
+echo "" > ${__jobsWorkPipe}.lock_w;
+echo "" > ${__jobsStatusPipe}.lock_w; 
 
+exec 7>${__jobsWorkPipe}.lock_r; 
+exec 8>${__jobsWorkPipe}.lock_w;
+exec 9>${__jobsStatusPipe}.lock_w; 
+
+	exec 4<"$taskTxt" # hard-coded fd
 	while [ $__jobsRunning -lt $runMax ]; do
 
 		readNewTask "$delim" <&4
@@ -627,7 +652,7 @@ jobsRunTasks()
             # https://unix.stackexchange.com/questions/450713/named-pipes-file-descriptors-and-eof/450715#450715
             # https://stackoverflow.com/questions/8410439/how-to-avoid-echo-closing-fifo-named-pipes-funny-behavior-of-unix-fifos/8410538#8410538
             set --
-            while read -r 2>/dev/null; do
+            while read; do
     			# This is a 'ping' - skip it
     			case $REPLY in ping:*) continue; esac
 
@@ -702,7 +727,7 @@ jobsRunTasks()
 			debug_log master "newTask[submit]: $task"
 workpipe_lock_w
     		echo "$task_id$ARG_DELIM$task_cmd" >$__jobsWorkPipe
-workpipe_unlock
+workpipe_unlock_w
 			debug_log master "newTask[------]: $task"
 #sleep .1s
         done
@@ -710,7 +735,9 @@ workpipe_unlock
 
 	trap - INT
 	trap - EXIT 
-
+exec 7<&-
+exec 8<&-
+exec 9<&-
 	# Do cleanup
 	jobsOnEXIT || true
 }
