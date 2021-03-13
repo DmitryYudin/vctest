@@ -640,6 +640,7 @@ echo "" > ${__jobsStatusPipe}.lock_w;
 
 exec 7>${__jobsWorkPipe}.lock_r; 
 exec 8>${__jobsWorkPipe}.lock_w;
+#exec 9>${__jobsStatusPipe}.lock_w
 exec 9<${__jobsStatusPipe}
 
     local id_done=0
@@ -649,7 +650,10 @@ exec 9<${__jobsStatusPipe}
 			jobsReportProgress
 
 			# Check feedback pipe still alived and not get destroyed on interrupt
-			[[ ! -e $__jobsStatusPipe ]] && break
+			if [[ ! -e $__jobsStatusPipe ]]; then
+    			debug_log master "status pipe broken"
+				break
+			fi
 
             # Single reader, multiple writers
             # https://unix.stackexchange.com/questions/450713/named-pipes-file-descriptors-and-eof/450715#450715
