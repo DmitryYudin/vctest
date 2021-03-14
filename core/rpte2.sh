@@ -41,8 +41,6 @@ usage()
 	                    =  0 - all CPUs
 	                    = -1 - all CPUs - 1    (i.e. reserve one core)
 	                    <  0 - all CPUs + |n|
-	    -d <char>    Task id delimiter: ':', ' ', ... . If not set, the Id is
-	                 generated automatically in the execution order (default: auto)
 	    -t <text>    Text message to append to stdout log for every executed task
 	    -f <flags>   Flags to append to a command line for every task
 EOT
@@ -76,14 +74,14 @@ entrypoint()
         rm -f tasks.txt
 		rm -rf tmp
         echo "Scheduling $((N*10)) tasks..."
-        printf -v REPLY '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' true true true true true true true true true true;
+        printf -v REPLY '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n # comment' \
+             true true true true true true true true true true;
         while [[ $i -lt $N ]]; do
             i=$((i+1))
             echo "$REPLY"
         done >> tasks.txt
 		jobsRunTasks tasks.txt -j4 -p tmp
 		jobsGetStatus || { echo "Complete with error" && return 1; }
-		echo "Success"
 	fi
 }
 
@@ -94,7 +92,6 @@ jobsGetStatus()
 {	
 	return $(( __jobsInterruptCnt + __jobsErrorCnt ))
 }
-
 
 # Ping self to report execution progress till the statusPIPE opened
 jobsStartPing()
@@ -130,17 +127,12 @@ executeSingleTask()
 	local id=$1; shift	
 	local cmd=$1; shift
 	local userText=$1; shift
-	local userFlags=$1; shift
-	local x=
-
-	# Append flags to command-line
-	cmd=$cmd${userFlags:+ "$userFlags"}
 
 	# Prepare command line
 	eval 'set -- $cmd'
-	for x; do shift;
-		x=$(eval printf "%s" "$x") # can't use 'echo' here due to '-e'
-		set -- "$@" "$x"
+	for REPLY; do shift;
+		x=$(eval printf "%s" "$REPLY") # can't use 'echo' here due to '-e'
+		set -- "$@" "$REPLY"
 	done
 
 	# Hack. Update cmd with evaluated parameters (just for debugging)
@@ -204,7 +196,6 @@ jobsStartWorker()
 	set -eu
 
 	local userText=$1; shift
-	local userFlags=$1; shift
 
 	local runningTaskId=
 	local runningTaskCmd=
@@ -228,32 +219,28 @@ jobsStartWorker()
 	}
 	trap onWorkerExit EXIT
 
-	# Continue reading while pipe exist
 	while : ; do
 		# read everthing from pipe to get no messages lost
         slave_read_task
 
-        local task=$REPLY
-
-		local id=${task%%:*} cmd=${task#*:}
+		local id=${REPLY%%:*} cmd=${REPLY#*:}
         id=${id#id=}
-		if [[ "$cmd" == $REPLY_EOF ]]; then
+        if [[ "$cmd" == $REPLY_EOF ]]; then
         	debug_log_worker "no more tasks: $cmd"
             break
 		fi
 
 		runningTaskId=$id
-		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
-
-    	debug_log_worker "Exec: id=$id cmd=[$cmd]"
-       	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
-
-        slave_write_status "$BASHPID:id=$runningTaskId:0:$runningTaskCmd"
-
+		runningTaskCmd=$cmd
+    	debug_log_worker "E id=$id cmd=[$cmd]"
+       	executeSingleTask "$id" "$cmd" "$userText"
 		runningTaskId=
 		runningTaskCmd=
-	done
-    debug_log_worker "exit main loop #$#: $@"
+
+        slave_write_status "$BASHPID:id=$id:0:$cmd"
+
+    done
+    debug_log_worker "exit main loop"
 
     workDone=1
     exit 0
@@ -354,43 +341,24 @@ jobsReportTaskFail()
 	fi
 }
 
-# Read ID and CMD for the next task from stdin.
-# (ID is only read if delimiter argument set)
-#
-# Return value is a REPLY variable in a form of "$id:$cmd"
-# Emty return value signals the end of the task list.
 readNewTask() 				
 {
-	local delim=$1; shift
+    REPLY=
 	while read -r; do   # Remove leading and trailing whitespaces
 		local x=$REPLY; x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}; REPLY=$x
 		case $REPLY in '#'*) continue;; esac # comment
 		[[ -z "$REPLY" ]] && continue
-		[[ "$REPLY" == $REPLY_EOF ]] && return
-
-		local id= cmd=$REPLY
-		if [[ -n "$delim" ]]; then
-			id=${REPLY%%$delim*}
-			cmd=${REPLY#"$id$delim"}
-			[[ "$id" == "$REPLY" ]] && echo "error: can't parse task id from '$REPLY' with delim '$delim'" >&2 && return 1
-			x=$id;  x=${x%"${x##*[! $'\t']}"}; id=$x
-			x=$cmd; x=${x#"${x%%[! $'\t']*}"}; cmd=$x
-		fi
-		# make sure $cmd is not empty
-		if [[ -n "$cmd" ]]; then
-			REPLY=$id:$cmd
-			return
-		fi
+        break
 	done
-	REPLY=
 }
 
+tempPath=.
 jobsRunTasks()
 {
 #	local -
 	set -eu
 
-	local taskTxt= delim= tempPath=. logLevel= runMax=1 userText= userFlags=
+	local taskTxt=  logLevel= runMax=1 userText= userFlags=
 	# set all 'kw' args to "-k v" form (accepted input: -kv | -k=v | -k v)
 	while [[ $# != 0 ]]; do
 		local i=$1 v; shift
@@ -401,7 +369,6 @@ jobsRunTasks()
 			fi 
 		esac
 		case $i in
-			-d*) delim=$v;;
 			-p*) tempPath=$v;;
 			-l*) logLevel=$v;;
 			-j*) runMax=$v;; # 0 => all CPUs, < 0 => nCPU+|x|
@@ -451,27 +418,29 @@ jobsRunTasks()
 	__jobsDoneMax=0
 	__jobsStartSec=$SECONDS
 	__jobsDisplay=
+
     # Count jobs number
-	while readNewTask "$delim"; do
+    rm -f $tempPath/tasks.txt
+	while readNewTask; do
 		[[ -z "$REPLY" ]] && break
 		__jobsDoneMax=$(( __jobsDoneMax + 1 ))
-	done <"$taskTxt"
+        echo "$REPLY${userFlags:+ $userFlags}"
+	done <$taskTxt >$tempPath/tasks.txt
+    taskTxt=$tempPath/tasks.txt
 
 	#
 	# Single-threaded
 	#
 	if [[ $ENABLE_NAMED_PIPE != 1 ]]; then
-		while readNewTask "$delim"; do
+		while readNewTask; do
 			[[ -z "$REPLY" ]] && break
-			local id=${REPLY%:*}
-			local cmd=${REPLY#*:}
-			[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
-
-			__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
+            local id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ))
+			local cmd=$REPLY
+			__jobsDisplay=$id:$cmd
 			__jobsRunning=1
 			jobsReportProgress
 
-			if ! executeSingleTask "$id" "$cmd" "$userText" "$userFlags"; then
+			if ! executeSingleTask $id "$cmd" "$userText"; then
 				__jobsDone=$(( __jobsDone + 1 ))
 				__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
 				jobsReportTaskFail "$id" 1 "$cmd" >&2
@@ -510,6 +479,7 @@ jobsRunTasks()
 		return 0
 	}
 	jobsOnEXIT() {
+
 		exec 4<&- # hard-coded fd
 
         master_destroy
@@ -528,7 +498,6 @@ jobsRunTasks()
 		{ jobsReportProgress; echo ""; }
 	}
 
-
 	__jobsPid=
 
     master_create debug_log_master
@@ -541,34 +510,34 @@ jobsRunTasks()
 	trap 'jobsOnINT' INT
 	trap 'jobsOnEXIT' EXIT
 
-	exec 4<"$taskTxt" # hard-coded fd
-	while [ $__jobsRunning -lt $runMax ]; do
-
-		readNewTask "$delim" <&4
+	exec 4<$taskTxt # hard-coded fd
+	while [[ $__jobsRunning -lt $runMax ]]; do
+		readNewTask <&4
 		[[ -z "$REPLY" ]] && break;
-		local id=${REPLY%:*}
-		local cmd=${REPLY#*:}
-		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
+		local id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ));
+		local cmd=$REPLY
 
-		jobsStartWorker "$userText" "$userFlags" 4<&- &
+		jobsStartWorker "$userText" 4<&- &
 		debug_log_master "jobsStartWorker $id pid=$!"
 
 		__jobsPid="$__jobsPid $!"
-		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
+		__jobsDisplay=$id:$cmd
 		__jobsRunning=$(( __jobsRunning + 1 ))
+
+        jobsReportProgress
 
         master_write_task "id=$id:$cmd"
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
 	setWorkerGone() {
-		local pid=$1 x=; shift
+		local pid=$1; shift
 		debug_log_master "setWorkerGone pid=$pid [start waiting pid]"
 
 		{ wait $pid || true; } 2>/dev/null  # may have already gone
 
 		set -- $__jobsPid; # remove from wait list
-		for x; do shift; if [[ $x != $pid ]]; then set -- "$@" $x; fi; done
+		for REPLY; do shift; if [[ $REPLY != $pid ]]; then set -- "$@" $REPLY; fi; done
 		__jobsPid="$@"
 		__jobsRunning=$((__jobsRunning - 1))		# worker exit
 
@@ -622,35 +591,28 @@ jobsRunTasks()
 		# Time to leave if no workers alive
 		[[ $__jobsRunning == 0 ]] && break;
 
+        REPLY=
 	    if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
-			readNewTask "$delim" <&4
+			readNewTask <&4
 			[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1
-		else
-			REPLY=
     	fi
-		local id=${REPLY%:*}    # ok if empty id / cmd
-		local cmd=${REPLY#*:}   #
-
-		# Reply with EOF message if no task was read
-		if [[ -z "$cmd" ]]; then
+		local id= cmd=
+		if [[ -z "$REPLY" ]]; then
 			id=$id_done
 			cmd=$REPLY_EOF
 			id_done=$(($id_done+1))
 		else
-    		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
+    		id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ));
+            cmd=$REPLY
 		fi
-		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
+		__jobsDisplay=$id:$cmd
 
 		jobsReportProgress
 
         master_write_task "id=$id:$cmd"
 	done
 
-	trap - INT
-	trap - EXIT 
-
-	# Do cleanup
-	jobsOnEXIT || true
+    debug_log_master "exit main loop"
 }
 
 entrypoint "$@"
