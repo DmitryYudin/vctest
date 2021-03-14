@@ -93,6 +93,24 @@ jobsGetStatus()
 	return $(( __jobsInterruptCnt + __jobsErrorCnt ))
 }
 
+work_init_reader() { exec 7>${__jobsWorkPipe}.lock_r; }
+workpipe_lock_r() { flock 7; }
+workpipe_unlock_r() { flock -u 7; }
+
+status_init_writer()
+{
+    exec 9>${__jobsStatusPipe}.lock_w;
+}
+status_write()
+{
+    flock 9
+    while ! echo "$1" > $__jobsStatusPipe; do
+        echo "$__jobsStatusPipe" >> gone.txt
+    done
+    flock -u 9
+}
+
+
 # Ping self to report execution progress till the statusPIPE opened
 jobsStartPing()
 {
@@ -102,12 +120,9 @@ jobsStartPing()
 	{
 		trap 'return 0' INT
 
-		exec 9>${__jobsStatusPipe}.lock_w; 
+        status_init_writer
 
-        while [[ -e $__jobsStatusPipe ]]; do
-statuspipe_lock
-            echo "ping::0:" > $__jobsStatusPipe
-statuspipe_unlock
+        while status_write "ping::0:"; do            
 			sleep $period
         done
 	} </dev/null 1>/dev/null 2>/dev/null &
@@ -198,25 +213,10 @@ debug_log()
     echo "$@" >> $tempPath/$logfile
 }
 
-#workpipe_lock_r() { exec 8>${__jobsWorkPipe}.lock_r; flock 8; }
-#workpipe_lock_w() { exec 8>${__jobsWorkPipe}.lock_w; flock 8; }
-#workpipe_unlock_r() { flock -u 8; exec 8<&-; }
-#workpipe_unlock_w() { flock -u 8; exec 8<&-; }
-#statuspipe_lock() { exec 8>${__jobsStatusPipe}.lock_w; flock 8; }
-#statuspipe_unlock() { flock -u 8; exec 8<&-; }
-
-workpipe_lock_r() { flock 7; }
-workpipe_lock_w() { flock 8; }
-statuspipe_lock() { flock 9; }
-workpipe_unlock_r() { flock -u 7; }
-workpipe_unlock_w() { flock -u 8; }
-statuspipe_unlock() { flock -u 9; }
-
 jobsStartWorker()
 {
 	[[ $ENABLE_NAMED_PIPE != 1 ]] && return 1
 
-#	local -
 	set -eu
 
 	local id=$1; shift
@@ -228,9 +228,8 @@ jobsStartWorker()
 	local runningTaskCmd=
     local workDone=
 
-exec 7>${__jobsWorkPipe}.lock_r; 
-exec 8>${__jobsWorkPipe}.lock_w;
-exec 9>${__jobsStatusPipe}.lock_w; 
+    status_init_writer
+    work_init_reader
 
 	onWorkerExit() {
 		local error_code=0
@@ -241,9 +240,7 @@ exec 9>${__jobsStatusPipe}.lock_w;
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
         debug_log worker "onexit[submit]: $error_code"
-        statuspipe_lock
-        echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" > $__jobsStatusPipe
-		statuspipe_unlock
+        status_write "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"
         debug_log worker "onexit[------]: $error_code"
 
         debug_log worker "Done"
@@ -273,12 +270,7 @@ exec 9>${__jobsStatusPipe}.lock_w;
 		# Report successful status since exit trap is expected to trig on failure
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
         debug_log worker "status[submit]: id=$id"
-	    statuspipe_lock
-		while ! echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" > $__jobsStatusPipe; do
-            echo "$__jobsStatusPipe" >> gone.txt
-:
-        done
-		statuspipe_unlock
+        status_write "$BASHPID:$runningTaskId:0:$runningTaskCmd"
 	    debug_log worker "status[------]: id=$id"
 
 		runningTaskId=
@@ -300,14 +292,17 @@ exec 9>${__jobsStatusPipe}.lock_w;
 
         if [[ $# -gt 0 ]]; then
             debug_log worker "push tasks back #$#: $@"
-            workpipe_lock_w
 			local msg
             for msg; do
 	            debug_log worker "------------------------ back: $msg"
-echo "back" >> back.txt
-				echo "$msg" >$__jobsWorkPipe
+                echo "back" >> back.txt
+
+        		local id=-${msg%$ARG_DELIM*}
+
+                debug_log worker "status[resend]: id=$id <$msg>"
+                status_write "$BASHPID:$id:0:$msg"
+        	    debug_log worker "status[------]: id=$id <$msg>"
 			done
-            workpipe_unlock_w
         fi
 	done
     debug_log worker "exit main loop #$#: $@"
@@ -600,14 +595,13 @@ jobsRunTasks()
 
 	jobsStartPing .3s
 	__jobsPingPid=$!
+    exec 9<${__jobsStatusPipe}
 
 	trap 'jobsOnINT' INT
 	trap 'jobsOnEXIT' EXIT
 
 echo "" > ${__jobsWorkPipe}.lock_r; 
-echo "" > ${__jobsWorkPipe}.lock_w;
-echo "" > ${__jobsStatusPipe}.lock_w; 
-
+echo "" > ${__jobsStatusPipe}.lock_w;
 
 	exec 4<"$taskTxt" # hard-coded fd
 	while [ $__jobsRunning -lt $runMax ]; do
@@ -641,69 +635,59 @@ echo "" > ${__jobsStatusPipe}.lock_w;
 		debug_log master "setWorkerGone pid=$pid [onchain $__jobsPid]"
 	}
 
-exec 7>${__jobsWorkPipe}.lock_r; 
-exec 8>${__jobsWorkPipe}.lock_w;
-#exec 9>${__jobsStatusPipe}.lock_w
-exec 9<${__jobsStatusPipe}
-
     local id_done=0
 	while : ; do
 		# Until have workers running
 		while [[ $__jobsRunning != 0 ]]; do
 			jobsReportProgress
 
-			# Check feedback pipe still alived and not get destroyed on interrupt
-			if [[ ! -e $__jobsStatusPipe ]]; then
-    			debug_log master "status pipe broken"
-				break
-			fi
-
             # Single reader, multiple writers
             # https://unix.stackexchange.com/questions/450713/named-pipes-file-descriptors-and-eof/450715#450715
             # https://stackoverflow.com/questions/8410439/how-to-avoid-echo-closing-fifo-named-pipes-funny-behavior-of-unix-fifos/8410538#8410538
             set --
             while read -r; do
-    			# This is a 'ping' - skip it
-    			case $REPLY in ping:*) continue; esac
+    			case $REPLY in 
+                    ping:*) jobsReportProgress;; # this is a 'ping' - skip it
+                    *) set -- "$@" "$REPLY"
+                esac
+            done <&9
 
-    			debug_log master "statusUpdate: $REPLY"
+            local msg= reply_pids=
+            for msg; do
+    			debug_log master "statusUpdate: $msg"
 
+                REPLY=$msg
     			local pid id status data x
-    			x=$REPLY
     			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; pid=$x
     			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; id=$x  # maybe empty
     			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; status=$x
-    			data=$x
+    			data=$REPLY
 
-                local needReply=
     			if [[ -z "$id" ]]; then
                     # Worker exit (maybe interrupted), we have nothing to do with completion status here
-                    setWorkerGone $pid 
+                    setWorkerGone $pid
+                elif [[ $id -lt 0 ]]; then
+        			debug_log master "newTask[resend]: $data"
+            		echo "$data" >$__jobsWorkPipe
+        			debug_log master "newTask[------]: $data"
     			else
     				debug_log master "jobsDone id=$id pid=$pid status=$status"
     
     				__jobsDone=$(( __jobsDone + 1 ))
     				if [[ "$status" != 0 ]]; then
-    					setWorkerGone $pid; pid= # worker exit due to task fail
+    					setWorkerGone $pid; # worker exit due to task fail
     
     					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
     					jobsReportTaskFail "$id" $status "$data" >&2
                     else
-                        needReply=1
+                        reply_pids="$reply_pids $pid"
+                        debug_log master "enqueue message from pid=$pid, #$# [$reply_pids]"
     				fi
     			fi
-				[[ $__jobsRunning == 0 ]] && break
-                if [[ -n $needReply ]]; then
-                    set -- "$@" "$pid"
-   	    			debug_log master "enqueue message from pid=$pid, #$# [$@]"
-                fi
-#                break
-#            done <$__jobsStatusPipe
-            done <&9
-    		jobsReportProgress
-
-            [[ $# != 0 ]] && break # continue waiting message we need to reply
+            done
+            [[ -n "$reply_pids" ]] && break # continue waiting message we need to reply
 		done
+        jobsReportProgress
 
         debug_log master "#$# messages in queue, start reply"
 
@@ -711,7 +695,7 @@ exec 9<${__jobsStatusPipe}
 		[[ $__jobsRunning == 0 ]] && break;
 
         local dummy
-        for dummy; do
+        for dummy in $reply_pids; do
 	    	if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
 				readNewTask "$delim" <&4
 				[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1
@@ -738,18 +722,13 @@ exec 9<${__jobsStatusPipe}
 			jobsReportProgress
 
 			debug_log master "newTask[submit]: $task"
-workpipe_lock_w
     		echo "$task_id$ARG_DELIM$task_cmd" >$__jobsWorkPipe
-workpipe_unlock_w
 			debug_log master "newTask[------]: $task"
-#sleep .1s
         done
 	done
 
 	trap - INT
 	trap - EXIT 
-exec 7<&-
-exec 8<&-
 exec 9<&-
 	# Do cleanup
 	jobsOnEXIT || true
