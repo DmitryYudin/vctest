@@ -257,30 +257,11 @@ jobsStartWorker()
         workpipe_lock_r
         set --
         debug_log worker "wp reading"
-        while [[ $# == 0 ]]; do
-#            while read -r; do set -- "$@" "$REPLY"; done <&8
-            read -r -u 8 && set -- "$@" "$REPLY" || true
-        done
+        while ! read -r -u 8; do :; done
         debug_log worker "wp unlock #$#: $@"
         workpipe_unlock_r
 
-        task=$1
-        shift
-
-        if [[ $# -gt 0 ]]; then
-            debug_log worker "push tasks back #$#: $@"
-			local msg
-            for msg; do
-	            debug_log worker "------------------------ back: $msg"
-                echo "back" >> back.txt
-
-        		local id=-${msg%$ARG_DELIM*}
-
-                debug_log worker "status[resend]: id=$id <$msg>"
-                status_write "$BASHPID:$id:0:$msg"
-        	    debug_log worker "status[------]: id=$id <$msg>"
-			done
-        fi
+        task=$REPLY
 
 		local id=${task%$ARG_DELIM*}
 		local cmd=${task#*$ARG_DELIM}
@@ -652,47 +633,43 @@ echo "" > ${__jobsStatusPipe}.lock_w;
             # Single reader, multiple writers
             # https://unix.stackexchange.com/questions/450713/named-pipes-file-descriptors-and-eof/450715#450715
             # https://stackoverflow.com/questions/8410439/how-to-avoid-echo-closing-fifo-named-pipes-funny-behavior-of-unix-fifos/8410538#8410538
-            set --
-            while read -r; do
-    			case $REPLY in 
-                    ping:*) jobsReportProgress;; # this is a 'ping' - skip it
-                    *) set -- "$@" "$REPLY"
-                esac
-            done <&9
-
-            local msg= reply_pids=
-            for msg; do
-    			debug_log master "statusUpdate: $msg"
-
-                REPLY=$msg
-    			local pid id status data x
-    			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; pid=$x
-    			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; id=$x  # maybe empty
-    			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; status=$x
-    			data=$REPLY
-
-    			if [[ -z "$id" ]]; then
-                    # Worker exit (maybe interrupted), we have nothing to do with completion status here
-                    setWorkerGone $pid
-                elif [[ $id -lt 0 ]]; then
-        			debug_log master "newTask[resend]: $data"
-            		echo "$data" >$__jobsWorkPipe
-        			debug_log master "newTask[------]: $data"
-    			else
-    				debug_log master "jobsDone id=$id pid=$pid status=$status"
-    
-    				__jobsDone=$(( __jobsDone + 1 ))
-    				if [[ "$status" != 0 ]]; then
-    					setWorkerGone $pid; # worker exit due to task fail
-    
-    					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
-    					jobsReportTaskFail "$id" $status "$data" >&2
-                    else
-                        reply_pids="$reply_pids $pid"
-                        debug_log master "enqueue message from pid=$pid, #$# [$reply_pids]"
-    				fi
-    			fi
+            REPLY=
+            while [[ -z "$REPLY" ]]; do
+                while ! read -r -u 9; do :; done
+    			case $REPLY in ping:*) jobsReportProgress; REPLY=; esac
             done
+
+            local msg=$REPLY reply_pids=
+			debug_log master "statusUpdate: $msg"
+
+            REPLY=$msg
+			local pid id status data x
+			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; pid=$x
+			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; id=$x  # maybe empty
+			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; status=$x
+			data=$REPLY
+
+			if [[ -z "$id" ]]; then
+                # Worker exit (maybe interrupted), we have nothing to do with completion status here
+                setWorkerGone $pid
+            elif [[ $id -lt 0 ]]; then
+    			debug_log master "newTask[resend]: $data"
+        		echo "$data" >$__jobsWorkPipe
+    			debug_log master "newTask[------]: $data"
+			else
+				debug_log master "jobsDone id=$id pid=$pid status=$status"
+
+				__jobsDone=$(( __jobsDone + 1 ))
+				if [[ "$status" != 0 ]]; then
+					setWorkerGone $pid; # worker exit due to task fail
+
+					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
+					jobsReportTaskFail "$id" $status "$data" >&2
+                else
+                    reply_pids="$reply_pids $pid"
+                    debug_log master "enqueue message from pid=$pid, #$# [$reply_pids]"
+				fi
+			fi
             [[ -n "$reply_pids" ]] && break # continue waiting message we need to reply
 		done
         jobsReportProgress
