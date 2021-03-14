@@ -4,6 +4,9 @@
 #
 set -eu -o pipefail
 
+dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
+. "$dirScript/message_q.sh"
+
 ENABLE_NAMED_PIPE=${ENABLE_NAMED_PIPE:-1}
 
 usage()
@@ -92,61 +95,6 @@ jobsGetStatus()
 	return $(( __jobsInterruptCnt + __jobsErrorCnt ))
 }
 
-PIPE_STATUS=
-PIPE_TASK=
-master_create()
-{
-    export PIPE_STATUS=$1
-    export PIPE_TASK=$2
-    for REPLY; do
-        rm -f -- $REPLY
-        mkfifo $REPLY
-        touch $REPLY.lock
-    done
-}
-master_destroy()
-{
-    rm -f -- $PIPE_STATUS
-    rm -f -- $PIPE_TASK
-}
-master_enable_read()
-{
-    exec 9<$PIPE_STATUS
-}
-master_read()
-{
-    while ! read -r -u 9; do :; done
-}
-master_write()
-{
-    echo "$1" >$PIPE_TASK
-}
-worker_enable_read()
-{
-    exec 8<$PIPE_TASK
-#    exec 7>$PIPE_TASK.lock
-}
-worker_read()
-{
-    exec 7>$PIPE_TASK.lock
-    flock 7
-    while ! read -r -u 8; do :; done
-    flock -u 7
-}
-status_init()
-{
-#    exec 9>$PIPE_STATUS.lock
-:
-}
-status_write()
-{
-    exec 9>$PIPE_STATUS.lock
-    flock 9
-    while ! echo "$1" > $PIPE_STATUS; do
-        echo "$PIPE_STATUS" >> gone.txt
-    done
-    flock -u 9
-}
 
 # Ping self to report execution progress till the statusPIPE opened
 jobsStartPing()
@@ -157,9 +105,7 @@ jobsStartPing()
 	{
 		trap 'return 0' INT
 
-        status_init
-
-        while status_write "ping::0:"; do            
+        while slave_write_status "ping::0:"; do            
 			sleep $period
         done
 	} </dev/null 1>/dev/null 2>/dev/null &
@@ -260,8 +206,7 @@ jobsStartWorker()
 	local runningTaskCmd=
     local workDone=
 
-    status_init
-    worker_enable_read
+    slave_init_taskPump
 
 	onWorkerExit() {
 		local error_code=0
@@ -272,7 +217,7 @@ jobsStartWorker()
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
         debug_log worker "onexit[submit]: $error_code"
-        status_write "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"
+        slave_write_status "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"
         debug_log worker "onexit[------]: $error_code"
 
         debug_log worker "Done"
@@ -284,7 +229,7 @@ jobsStartWorker()
 	while : ; do
 		# read everthing from pipe to get no messages lost
         debug_log worker "wp read"
-        worker_read
+        slave_read_task
         debug_log worker "wp read: $REPLY"
 
         local task=$REPLY
@@ -302,7 +247,7 @@ jobsStartWorker()
        	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
 
         debug_log worker "status[submit]: id=$id"
-        status_write "$BASHPID:$runningTaskId:0:$runningTaskCmd"
+        slave_write_status "$BASHPID:$runningTaskId:0:$runningTaskCmd"
 	    debug_log worker "status[------]: id=$id"
 
 		runningTaskId=
@@ -593,7 +538,7 @@ jobsRunTasks()
 	jobsStartPing .3s
 	__jobsPingPid=$!
 
-    master_enable_read
+    master_init_statusPump
 
 	trap 'jobsOnINT' INT
 	trap 'jobsOnEXIT' EXIT
@@ -616,7 +561,7 @@ jobsRunTasks()
 
         local task=$id:$cmd
         debug_log master "newTask[submit]: $task"
-        master_write "$task"
+        master_write_task "$task"
     	debug_log master "newTask[------]: $task"
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
@@ -646,7 +591,7 @@ jobsRunTasks()
             # https://stackoverflow.com/questions/8410439/how-to-avoid-echo-closing-fifo-named-pipes-funny-behavior-of-unix-fifos/8410538#8410538
             REPLY=
             while [[ -z "$REPLY" ]]; do
-                master_read
+                master_read_status
     			case $REPLY in ping:*) jobsReportProgress; REPLY=; esac
             done
 
@@ -712,7 +657,7 @@ jobsRunTasks()
 
         local task=$task_id:$task_cmd
         debug_log master "newTask[submit]: $task"
-        master_write "$task"
+        master_write_task "$task"
     	debug_log master "newTask[------]: $task"
 	done
 
