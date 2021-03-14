@@ -192,6 +192,8 @@ debug_log()
     [[ $type == worker ]] && logfile=worker.$BASHPID.log || logfile=master.log
     echo "$@" >> $tempPath/$logfile
 }
+debug_log_master() { debug_log master "$@"; }
+debug_log_worker() { debug_log worker "$@"; }
 
 jobsStartWorker()
 {
@@ -206,6 +208,7 @@ jobsStartWorker()
 	local runningTaskCmd=
     local workDone=
 
+    slave_create debug_log_worker
     slave_init_taskPump
 
 	onWorkerExit() {
@@ -213,14 +216,12 @@ jobsStartWorker()
 		[[ -n "$runningTaskId" ]] && error_code=1
 		[[ -n "$workDone" ]] && error_code=0
 
-        debug_log worker "exit: id=$runningTaskId workDone=$workDone error_code=$error_code"
+        debug_log_worker "exit: id=$runningTaskId workDone=$workDone error_code=$error_code"
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        debug_log worker "onexit[submit]: $error_code"
-        slave_write_status "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd"
-        debug_log worker "onexit[------]: $error_code"
+        slave_write_status "$BASHPID:id=$runningTaskId:$error_code:$runningTaskCmd"
 
-        debug_log worker "Done"
+        debug_log_worker "Done"
 		exit $error_code
 	}
 	trap onWorkerExit EXIT
@@ -228,32 +229,28 @@ jobsStartWorker()
 	# Continue reading while pipe exist
 	while : ; do
 		# read everthing from pipe to get no messages lost
-        debug_log worker "wp read"
         slave_read_task
-        debug_log worker "wp read: $REPLY"
 
         local task=$REPLY
 
 		local id=${task%%:*} cmd=${task#*:}
 		if [[ "$cmd" == $REPLY_EOF ]]; then
-        	debug_log worker "no more tasks: $cmd"
+        	debug_log_worker "no more tasks: $cmd"
             break
 		fi
 
 		runningTaskId=$id
 		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
 
-    	debug_log worker "Exec: id=$id cmd=[$cmd]"
+    	debug_log_worker "Exec: id=$id cmd=[$cmd]"
        	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
 
-        debug_log worker "status[submit]: id=$id"
-        slave_write_status "$BASHPID:$runningTaskId:0:$runningTaskCmd"
-	    debug_log worker "status[------]: id=$id"
+        slave_write_status "$BASHPID:id=$runningTaskId:0:$runningTaskCmd"
 
 		runningTaskId=
 		runningTaskCmd=
 	done
-    debug_log worker "exit main loop #$#: $@"
+    debug_log_worker "exit main loop #$#: $@"
 
     workDone=1
     exit 0
@@ -528,12 +525,10 @@ jobsRunTasks()
 		{ jobsReportProgress; echo ""; }
 	}
 
-    local tempVar=/tmp/vctest
-    mkdir -p $tempVar
 
 	__jobsPid=
 
-    master_create $tempVar/pipe_status.$$ $tempVar/pipe_task.$$
+    master_create
 
 	jobsStartPing .3s
 	__jobsPingPid=$!
@@ -553,22 +548,22 @@ jobsRunTasks()
 		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 
 		jobsStartWorker "$userText" "$userFlags" 4<&- &
-		debug_log master "jobsStartWorker $id pid=$!"
+		debug_log_master "jobsStartWorker $id pid=$!"
 
 		__jobsPid="$__jobsPid $!"
 		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
 		__jobsRunning=$(( __jobsRunning + 1 ))
 
         local task=$id:$cmd
-        debug_log master "newTask[submit]: $task"
+        debug_log_master "newTask[submit]: $task"
         master_write_task "$task"
-    	debug_log master "newTask[------]: $task"
+    	debug_log_master "newTask[------]: $task"
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
 	setWorkerGone() {
 		local pid=$1 x=; shift
-		debug_log master "setWorkerGone pid=$pid [start waiting pid]"
+		debug_log_master "setWorkerGone pid=$pid [start waiting pid]"
 
 		{ wait $pid || true; } 2>/dev/null  # may have already gone
 
@@ -577,7 +572,7 @@ jobsRunTasks()
 		__jobsPid="$@"
 		__jobsRunning=$((__jobsRunning - 1))		# worker exit
 
-		debug_log master "setWorkerGone pid=$pid [onchain $__jobsPid]"
+		debug_log_master "setWorkerGone pid=$pid [onchain $__jobsPid]"
 	}
 
     local id_done=0
@@ -596,7 +591,7 @@ jobsRunTasks()
             done
 
             local msg=$REPLY
-			debug_log master "statusUpdate: $msg"
+			debug_log_master "statusUpdate: $msg"
 
             REPLY=$msg
 			local pid id status data x
@@ -604,12 +599,12 @@ jobsRunTasks()
 			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; id=$x  # maybe empty
 			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; status=$x
 			data=$REPLY
-
+            id=${id#id=}
 			if [[ -z "$id" ]]; then
                 # Worker exit (maybe interrupted), we have nothing to do with completion status here
                 setWorkerGone $pid
 			else
-				debug_log master "jobsDone id=$id pid=$pid status=$status"
+				debug_log_master "jobsDone id=$id pid=$pid status=$status"
 
 				__jobsDone=$(( __jobsDone + 1 ))
 				if [[ "$status" != 0 ]]; then
@@ -618,14 +613,14 @@ jobsRunTasks()
 					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
 					jobsReportTaskFail "$id" $status "$data" >&2
                 else
-                    debug_log master "enqueue message from pid=$pid"
+                    debug_log_master "enqueue message from pid=$pid"
                     break # must reply on this message
 				fi
 			fi
 		done
         jobsReportProgress
 
-        debug_log master "start reply"
+        debug_log_master "start reply"
 
 		# Time to leave if no workers alive
 		[[ $__jobsRunning == 0 ]] && break;
@@ -656,9 +651,9 @@ jobsRunTasks()
 		jobsReportProgress
 
         local task=$task_id:$task_cmd
-        debug_log master "newTask[submit]: $task"
+        debug_log_master "newTask[submit]: $task"
         master_write_task "$task"
-    	debug_log master "newTask[------]: $task"
+    	debug_log_master "newTask[------]: $task"
 	done
 
 	trap - INT
