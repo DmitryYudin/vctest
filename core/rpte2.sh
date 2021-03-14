@@ -229,6 +229,8 @@ jobsStartWorker()
     status_init_writer
     work_init_reader
 
+    exec 8<$__jobsWorkPipe
+
 	onWorkerExit() {
 		local error_code=0
 		[[ -n "$runningTaskId" ]] && error_code=1
@@ -250,15 +252,17 @@ jobsStartWorker()
 	# Continue reading while pipe exist
 	local no_more_tasks=
 	while : ; do
-
+		# read everthing from pipe to get no messages lost
         debug_log worker "wp lock"
         workpipe_lock_r
-        debug_log worker "wp reading"
-		# read everthing from pipe to get no messages lost
         set --
-        while read -r; do set -- "$@" "$REPLY"; done <$__jobsWorkPipe
+        debug_log worker "wp reading"
+        while [[ $# == 0 ]]; do
+#            while read -r; do set -- "$@" "$REPLY"; done <&8
+            read -r -u 8 && set -- "$@" "$REPLY" || true
+        done
         debug_log worker "wp unlock #$#: $@"
-		workpipe_unlock_r
+        workpipe_unlock_r
 
         task=$1
         shift
