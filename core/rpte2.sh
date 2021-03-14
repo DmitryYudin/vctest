@@ -86,7 +86,6 @@ entrypoint()
 
 # Progress reported to stdout (since report progress on interrupt)
 # Errors are printed to stderr
-readonly ARG_DELIM=$'\004' # EOT (non-printable)
 readonly REPLY_EOF='-'
 jobsGetStatus()
 {	
@@ -97,20 +96,20 @@ PIPE_STATUS=
 PIPE_TASK=
 master_create()
 {
+    export PIPE_STATUS=$1
+    export PIPE_TASK=$2
     for REPLY; do
         rm -f -- $REPLY
         mkfifo $REPLY
         touch $REPLY.lock
     done
-    export PIPE_STATUS=$1
-    export PIPE_TASK=$2
 }
 master_destroy()
 {
     rm -f -- $PIPE_STATUS
     rm -f -- $PIPE_TASK
 }
-master_init()
+master_enable_read()
 {
     exec 9<$PIPE_STATUS
 }
@@ -120,32 +119,28 @@ master_read()
 }
 master_write()
 {
-    local id=$1
-    local cmd=$2
-    debug_log master "newTask[submit]: $id:$cmd"
-    echo "$id$ARG_DELIM$cmd" >$PIPE_TASK
-	debug_log master "newTask[------]: $id:$cmd"
+    echo "$1" >$PIPE_TASK
 }
-worker_init()
+worker_enable_read()
 {
     exec 8<$PIPE_TASK
-    exec 7>$PIPE_TASK.lock
+#    exec 7>$PIPE_TASK.lock
 }
 worker_read()
 {
-    debug_log worker "wp lock"
+    exec 7>$PIPE_TASK.lock
     flock 7
-    debug_log worker "wp reading"
     while ! read -r -u 8; do :; done
-    debug_log worker "wp unlock #$#: $@"
     flock -u 7
 }
 status_init()
 {
-    exec 9>$PIPE_STATUS.lock;
+#    exec 9>$PIPE_STATUS.lock
+:
 }
 status_write()
 {
+    exec 9>$PIPE_STATUS.lock
     flock 9
     while ! echo "$1" > $PIPE_STATUS; do
         echo "$PIPE_STATUS" >> gone.txt
@@ -266,7 +261,7 @@ jobsStartWorker()
     local workDone=
 
     status_init
-    worker_init
+    worker_enable_read
 
 	onWorkerExit() {
 		local error_code=0
@@ -288,12 +283,13 @@ jobsStartWorker()
 	# Continue reading while pipe exist
 	while : ; do
 		# read everthing from pipe to get no messages lost
+        debug_log worker "wp read"
         worker_read
+        debug_log worker "wp read: $REPLY"
+
         local task=$REPLY
 
-		local id=${task%$ARG_DELIM*}
-		local cmd=${task#*$ARG_DELIM}
-
+		local id=${task%%:*} cmd=${task#*:}
 		if [[ "$cmd" == $REPLY_EOF ]]; then
         	debug_log worker "no more tasks: $cmd"
             break
@@ -416,7 +412,7 @@ jobsReportTaskFail()
 # Read ID and CMD for the next task from stdin.
 # (ID is only read if delimiter argument set)
 #
-# Return value is a REPLY variable in a form of "$id$ARG_DELIM$cmd"
+# Return value is a REPLY variable in a form of "$id:$cmd"
 # Emty return value signals the end of the task list.
 readNewTask() 				
 {
@@ -437,7 +433,7 @@ readNewTask()
 		fi
 		# make sure $cmd is not empty
 		if [[ -n "$cmd" ]]; then
-			REPLY=$id$ARG_DELIM$cmd
+			REPLY=$id:$cmd
 			return
 		fi
 	done
@@ -522,8 +518,8 @@ jobsRunTasks()
 	if [[ $ENABLE_NAMED_PIPE != 1 ]]; then
 		while readNewTask "$delim"; do
 			[[ -z "$REPLY" ]] && break
-			local id=${REPLY%$ARG_DELIM*}
-			local cmd=${REPLY#*$ARG_DELIM}
+			local id=${REPLY%:*}
+			local cmd=${REPLY#*:}
 			[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 
 			__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
@@ -597,7 +593,7 @@ jobsRunTasks()
 	jobsStartPing .3s
 	__jobsPingPid=$!
 
-    master_init
+    master_enable_read
 
 	trap 'jobsOnINT' INT
 	trap 'jobsOnEXIT' EXIT
@@ -607,8 +603,8 @@ jobsRunTasks()
 
 		readNewTask "$delim" <&4
 		[[ -z "$REPLY" ]] && break;
-		local id=${REPLY%$ARG_DELIM*}
-		local cmd=${REPLY#*$ARG_DELIM}
+		local id=${REPLY%:*}
+		local cmd=${REPLY#*:}
 		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 
 		jobsStartWorker "$userText" "$userFlags" 4<&- &
@@ -618,7 +614,10 @@ jobsRunTasks()
 		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
 		__jobsRunning=$(( __jobsRunning + 1 ))
 
-        master_write $id "$cmd"
+        local task=$id:$cmd
+        debug_log master "newTask[submit]: $task"
+        master_write "$task"
+    	debug_log master "newTask[------]: $task"
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
@@ -692,8 +691,8 @@ jobsRunTasks()
 		else
 			REPLY=
     	fi
-		local id=${REPLY%$ARG_DELIM*}    # ok if empty id / cmd
-		local cmd=${REPLY#*$ARG_DELIM}   #
+		local id=${REPLY%:*}    # ok if empty id / cmd
+		local cmd=${REPLY#*:}   #
 
 		local task_id task_cmd;
 		# Reply with EOF message if no task was read
@@ -711,7 +710,10 @@ jobsRunTasks()
 
 		jobsReportProgress
 
-        master_write $task_id "$task_cmd"
+        local task=$task_id:$task_cmd
+        debug_log master "newTask[submit]: $task"
+        master_write "$task"
+    	debug_log master "newTask[------]: $task"
 	done
 
 	trap - INT
