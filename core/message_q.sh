@@ -62,20 +62,28 @@ master_create()
 }
 master_destroy()
 {
-    rm -f -- $PIPE_STATUS
-    rm -f -- $PIPE_TASK
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status destroy";     rm -f -- $PIPE_STATUS
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status destroed";     
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I task destroy";       rm -f -- $PIPE_TASK
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status destroed";     
 }
 master_init_statusPump()
 {
-    exec 9<$PIPE_STATUS
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status open";        exec 9<$PIPE_STATUS
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status opened";     
 }
 master_read_status()
 {
-    while ! read -r -u 9; do :; done
+    local msg
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r status reading";     while ! read -r -u 9 msg; do :; done
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r status read [$msg]"
+    REPLY=$msg
 }
 master_write_task()
 {
-    echo "$1" >$PIPE_TASK
+    local msg=$1
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w task write [$msg]";  echo "$msg" >$PIPE_TASK
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w task written";
 }
 
 slave_create()
@@ -83,15 +91,15 @@ slave_create()
     PIPE_LOGGER=${1:-}
 }
 slave_init_taskPump()
-{
-    exec 9<$PIPE_TASK
+{    
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I task open";          exec 9<$PIPE_TASK
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I task opened";     
 }
 slave_read_task()
 {
     [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task lock open";     exec 8>$PIPE_TASK.lock    
     [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task lock";          flock 8
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task locked";        while ! read -r -u 9; do :; done
-    local msg=$REPLY
+    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task locked";        while ! read -r -u 9 msg; do :; done
     [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task read [$msg]";   flock -u 8
     [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task unlocked";      exec 8<&-
     REPLY=$msg

@@ -105,6 +105,8 @@ jobsStartPing()
 	{
 		trap 'return 0' INT
 
+        slave_create
+
         while slave_write_status "ping::0:"; do            
 			sleep $period
         done
@@ -234,6 +236,7 @@ jobsStartWorker()
         local task=$REPLY
 
 		local id=${task%%:*} cmd=${task#*:}
+        id=${id#id=}
 		if [[ "$cmd" == $REPLY_EOF ]]; then
         	debug_log_worker "no more tasks: $cmd"
             break
@@ -528,7 +531,7 @@ jobsRunTasks()
 
 	__jobsPid=
 
-    master_create
+    master_create debug_log_master
 
 	jobsStartPing .3s
 	__jobsPingPid=$!
@@ -554,10 +557,7 @@ jobsRunTasks()
 		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
 		__jobsRunning=$(( __jobsRunning + 1 ))
 
-        local task=$id:$cmd
-        debug_log_master "newTask[submit]: $task"
-        master_write_task "$task"
-    	debug_log_master "newTask[------]: $task"
+        master_write_task "id=$id:$cmd"
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
@@ -591,8 +591,6 @@ jobsRunTasks()
             done
 
             local msg=$REPLY
-			debug_log_master "statusUpdate: $msg"
-
             REPLY=$msg
 			local pid id status data x
 			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; pid=$x
@@ -613,7 +611,6 @@ jobsRunTasks()
 					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
 					jobsReportTaskFail "$id" $status "$data" >&2
                 else
-                    debug_log_master "enqueue message from pid=$pid"
                     break # must reply on this message
 				fi
 			fi
@@ -634,26 +631,19 @@ jobsRunTasks()
 		local id=${REPLY%:*}    # ok if empty id / cmd
 		local cmd=${REPLY#*:}   #
 
-		local task_id task_cmd;
 		# Reply with EOF message if no task was read
 		if [[ -z "$cmd" ]]; then
-			task_id=$id_done
-			task_cmd=$REPLY_EOF
+			id=$id_done
+			cmd=$REPLY_EOF
 			id_done=$(($id_done+1))
 		else
     		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
-			task_id=$id
-			task_cmd=$cmd
 		fi
-		local task=$task_id:$task_cmd
-		__jobsDisplay=$task${userFlags:+ $userFlags}
+		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
 
 		jobsReportProgress
 
-        local task=$task_id:$task_cmd
-        debug_log_master "newTask[submit]: $task"
-        master_write_task "$task"
-    	debug_log_master "newTask[------]: $task"
+        master_write_task "id=$id:$cmd"
 	done
 
 	trap - INT
