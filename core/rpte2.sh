@@ -219,8 +219,6 @@ jobsStartWorker()
 
 	set -eu
 
-	local id=$1; shift
-	local cmd=$1; shift
 	local userText=$1; shift
 	local userFlags=$1; shift
 
@@ -252,31 +250,6 @@ jobsStartWorker()
 	# Continue reading while pipe exist
 	local no_more_tasks=
 	while : ; do
-		local id=${task%$ARG_DELIM*}
-		local cmd=${task#*$ARG_DELIM}
-
-		if [[ "$cmd" == "$REPLY_EOF" ]]; then
-			no_more_tasks=1
-        	debug_log worker "no more tasks: $cmd"
-			break
-		fi
-
-		runningTaskId=$id
-		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
-
-    	debug_log worker "Exec: id=$id cmd=[$cmd]"
-       	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
-
-		# Report successful status since exit trap is expected to trig on failure
-		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        debug_log worker "status[submit]: id=$id"
-        status_write "$BASHPID:$runningTaskId:0:$runningTaskCmd"
-	    debug_log worker "status[------]: id=$id"
-
-		runningTaskId=
-		runningTaskCmd=
-
-		[[ -n $no_more_tasks ]] && break
 
         debug_log worker "wp lock"
         workpipe_lock_r
@@ -304,6 +277,33 @@ jobsStartWorker()
         	    debug_log worker "status[------]: id=$id <$msg>"
 			done
         fi
+
+		local id=${task%$ARG_DELIM*}
+		local cmd=${task#*$ARG_DELIM}
+
+		if [[ "$cmd" == "$REPLY_EOF" ]]; then
+			no_more_tasks=1
+        	debug_log worker "no more tasks: $cmd"
+			break
+		fi
+
+		runningTaskId=$id
+		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
+
+    	debug_log worker "Exec: id=$id cmd=[$cmd]"
+       	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
+
+		# Report successful status since exit trap is expected to trig on failure
+		# open pipe first to avoid 'echo: write error: Broken pipe' message
+        debug_log worker "status[submit]: id=$id"
+        status_write "$BASHPID:$runningTaskId:0:$runningTaskCmd"
+	    debug_log worker "status[------]: id=$id"
+
+		runningTaskId=
+		runningTaskCmd=
+
+		[[ -n $no_more_tasks ]] && break
+
 	done
     debug_log worker "exit main loop #$#: $@"
 
@@ -612,12 +612,16 @@ echo "" > ${__jobsStatusPipe}.lock_w;
 		local cmd=${REPLY#*$ARG_DELIM}
 		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
 
-		jobsStartWorker "$id" "$cmd" "$userText" "$userFlags" 4<&- &
+		jobsStartWorker "$userText" "$userFlags" 4<&- &
 		debug_log master "jobsStartWorker $id pid=$!"
 
 		__jobsPid="$__jobsPid $!"
 		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
 		__jobsRunning=$(( __jobsRunning + 1 ))
+
+		debug_log master "newTask[submit]: $id:$cmd"
+    	echo "$id$ARG_DELIM$cmd" >$__jobsWorkPipe
+    	debug_log master "newTask[------]: $id:$cmd"
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
