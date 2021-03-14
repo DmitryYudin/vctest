@@ -15,24 +15,25 @@ queue. The child may read tasks from this queue and report its status into
 All read and write operations are blocking. This is an application responsibility 
 to implement communication protocol without interlocking.
 
-    MASTER                                      SLAVE
-
-    master_create                               slave_create
-
-    for numWorkers
-        run-worker-in-background &        /---> slave_init_taskPump
-    done                                  |
-                                       unblock
-    for numWorkers                        |
-        master_write_task $initialTask ---/     
-    done
-                                                while true; do
-                                                    slave_read_task
-                                                    [[ task == EOF ]] && break
-                                                    execute_task
-                                           ----     slave_write_status
-    master_init_statusPump <--- unblock --/     done
-
+MASTER() {                         /------>|SLAVE() {
+                                   .       |
+    master_create                  .       |    slave_create
+                                   .       |
+    # Run workers in a background  .       |
+    for numWorkers                 .       |
+        SLAVE & >------------------/     /-|--> slave_init_taskPump
+    done                                 . |
+                                   unblock |
+    for numWorkers                       . |
+        master_write_task $initialTask >-/ |     
+    done                                   |
+                                           |    while true; do
+                                           |        slave_read_task
+                                           |        [[ task == EOF ]] && break
+                                           |        execute_task
+                                           |------< slave_write_status
+    master_init_statusPump <--- unblock --/|    done
+                                           |}
     for numTasks
         master_read_status
         master_write_task
@@ -43,6 +44,7 @@ to implement communication protocol without interlocking.
     done
 
     master_destroy
+}
 EOT
 }
 

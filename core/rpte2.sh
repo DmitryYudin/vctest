@@ -18,23 +18,18 @@ usage()
 	command. For each line, the substitution of shell variables is performed,
 	followed by the execution of the resulting expression. No more commands are
 	scheduled if execution failed. Instead, the stdout/stderr logs are printed
-	on the screen, all scheduled commands are waited to complete and script
+	on a screen, all scheduled commands are waited to complete and script
 	terminates with nonzero status.
 
 	Normally, only execution progress is displayed. Each task is executed with
 	the output streams redirected to a '$tempPath/$id.std{out,err}.log' files
-	where 'id' is an auto incremented number or an  unique tag specified as a
-	command prefix.
-
-	This script requires bash to use 'errexit' mode. Do not call it as a part
-	of composed shell command, see 'set -e' description at
-	https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html
+	where 'id' is an auto incremented task number.
 
 	Usage:
 	    rpte.sh <testplan> [options]
 
 	Options:
-	    -h|--help    Print this help
+	    -h,--help    Print this help
 	       --test    Run test
 	    -p <path>    Temporary path for stdout/stderr logs
 	    -j <n>       Maximum number of tasks running in parallel (default: 1)
@@ -68,30 +63,30 @@ entrypoint()
 
 	if ! $do_test; then
 		jobsRunTasks "$@"
-		jobsGetStatus || return 1
 	else
-        local i=0 N=20
-        rm -f tasks.txt
+        local i=0 N=20 self=$0
 		rm -rf tmp
         echo "Scheduling $((N*10)) tasks..."
         printf -v REPLY '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n # comment' \
-             true true true true true true true true true true;
+             true true true true true true true true true true
         while [[ $i -lt $N ]]; do
             i=$((i+1))
             echo "$REPLY"
-        done >> tasks.txt
-		jobsRunTasks tasks.txt -j4 -p tmp
-		jobsGetStatus || { echo "Complete with error" && return 1; }
+        done > tasks.txt
+
+        local self=$0
+		if "$self" -p tmp -j4 tasks.txt; then
+            echo Success
+        else
+            echo "Complete with error"
+            return 1
+        fi
 	fi
 }
 
 # Progress reported to stdout (since report progress on interrupt)
 # Errors are printed to stderr
 readonly REPLY_EOF='-'
-jobsGetStatus()
-{	
-	return $(( __jobsInterruptCnt + __jobsErrorCnt ))
-}
 
 # Ping self to report execution progress till the statusPIPE opened
 jobsStartPing()
@@ -341,24 +336,12 @@ jobsReportTaskFail()
 	fi
 }
 
-readNewTask() 				
-{
-    REPLY=
-	while read -r; do   # Remove leading and trailing whitespaces
-		local x=$REPLY; x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}; REPLY=$x
-		case $REPLY in '#'*) continue;; esac # comment
-		[[ -z "$REPLY" ]] && continue
-        break
-	done
-}
-
 tempPath=.
 jobsRunTasks()
 {
-#	local -
 	set -eu
 
-	local taskTxt=  logLevel= runMax=1 userText= userFlags=
+	local taskTxt= logLevel= runMax=1 userText= userFlags=
 	# set all 'kw' args to "-k v" form (accepted input: -kv | -k=v | -k v)
 	while [[ $# != 0 ]]; do
 		local i=$1 v; shift
@@ -420,19 +403,21 @@ jobsRunTasks()
 	__jobsDisplay=
 
     # Count jobs number
-    rm -f $tempPath/tasks.txt
-	while readNewTask; do
-		[[ -z "$REPLY" ]] && break
+    local testPlan=$tempPath/tasks.$$.txt
+    rm -f $testPlan
+	while read -r; do   # Remove leading and trailing whitespaces
+		local x=$REPLY; x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}; REPLY=$x
+		case $REPLY in '#'*) continue;; esac # comment
+		[[ -z "$REPLY" ]] && continue
 		__jobsDoneMax=$(( __jobsDoneMax + 1 ))
         echo "$REPLY${userFlags:+ $userFlags}"
-	done <$taskTxt >$tempPath/tasks.txt
-    taskTxt=$tempPath/tasks.txt
+	done <$taskTxt >$testPlan
 
 	#
 	# Single-threaded
 	#
 	if [[ $ENABLE_NAMED_PIPE != 1 ]]; then
-		while readNewTask; do
+		while read -r; do
 			[[ -z "$REPLY" ]] && break
             local id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ))
 			local cmd=$REPLY
@@ -447,7 +432,7 @@ jobsRunTasks()
 				break;
 			fi
 			__jobsDone=$(( __jobsDone + 1 ))
-		done <"$taskTxt"
+		done <$testPlan
 		__jobsNoMoreTasks=1
 		__jobsRunning=0
 		jobsReportProgress
@@ -488,7 +473,7 @@ jobsRunTasks()
 			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 1>/dev/null  2>/dev/null
 		fi
 		if [[ -n "$__jobsPid" ]]; then
-			echo "warn: waiting for unfinished jobs: $__jobsPid"
+			debug_log_master "waiting for unfinished jobs: $__jobsPid"
 			{ kill -s TERM $__jobsPid && wait $__jobsPid || true; } >/dev/null
 		fi
 
@@ -496,6 +481,10 @@ jobsRunTasks()
         master_destroy
 
 		{ jobsReportProgress; echo ""; }
+
+        local exit_status=0
+        [[ $__jobsInterruptCnt != 0 || $__jobsErrorCnt != 0 ]] && exit_status=1
+        exit $exit_status
 	}
 
 	__jobsPid=
@@ -510,9 +499,10 @@ jobsRunTasks()
 	trap 'jobsOnINT' INT
 	trap 'jobsOnEXIT' EXIT
 
-	exec 4<$taskTxt # hard-coded fd
+	exec 4<$testPlan # hard-coded fd
 	while [[ $__jobsRunning -lt $runMax ]]; do
-		readNewTask <&4
+        REPLY=
+		read -r -u 4 || true
 		[[ -z "$REPLY" ]] && break;
 		local id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ));
 		local cmd=$REPLY
@@ -593,7 +583,7 @@ jobsRunTasks()
 
         REPLY=
 	    if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
-			readNewTask <&4
+			read -r -u 4 || true
 			[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1
     	fi
 		local id= cmd=
