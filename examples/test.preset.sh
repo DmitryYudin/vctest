@@ -2,12 +2,8 @@
 set -eu -o pipefail
 
 CODECS="ashevc x265 kvazaar kingsoft intel_sw intel_hw h265demo h264demo"
-
-PRMS="1500"
-
-VECTORS=""
-VECTORS="$VECTORS FourPeople_1280x720_30fps.yuv"
-VECTORS="$VECTORS stockholm_ter_1280x720_30fps.yuv"
+PRMS=42
+VECTORS="akiyo_176x144_30fps.yuv akiyo_352x288_30fps.yuv foreman_176x144_30fps.yuv foreman_352x288_30fps.yuv"
 
 get_preset_list()
 {
@@ -20,7 +16,7 @@ get_preset_list()
         intel_hw) REPLY="                    veryfast faster";; # fast medium slow";;
         h265demo) REPLY="6 5";; # 4 3 2"
         h264demo) REPLY="";; # no presets
-        *) echo "error: unknown codecId" && exit 1;;
+        *) echo "error: unknown codecId">&2 && exit 1;;
     esac
     REPLY=$(echo $REPLY)
 }
@@ -29,5 +25,4 @@ for codec in $CODECS; do
     get_preset_list $codec; presets=$REPLY
     echo "Benchmark '$codec' with --presets=[$presets]"
     ../core/testbench.sh -i "$VECTORS" -c $codec -p "$PRMS" -o report.log ${presets:+ --preset "$presets"} "$@"
-    echo ""
 done
