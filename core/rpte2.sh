@@ -319,7 +319,7 @@ jobsRunTasks()
     # set term width
 	if [[ -z ${COLUMNS:-} ]]; then
 		case ${OS:-} in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2); esac
-        [[ -z ${COLUMNS:-} ]] && command -v tput >/dev/null 2>&1 && COLUMNS=$(tput cols)
+        [[ -z ${COLUMNS:-} ]] && [[ -n $TERM ]] && command -v tput >/dev/null 2>&1 && COLUMNS=$(tput ${TERM:+ -T $TERM} cols)
         [[ -n ${COLUMNS:-} ]] && export COLUMNS
     fi
 

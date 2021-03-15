@@ -112,7 +112,7 @@ print_console()
 	cut_to_console_width() {
 		if [[ -z ${COLUMNS:-} ]]; then
 			case ${OS:-} in *_NT) COLUMNS=$(mode.com 'con:' | grep -i Columns: | tr -d ' ' | cut -s -d':' -f2); esac
-            [[ -z ${COLUMNS:-} ]] && command -v tput &>/dev/null && COLUMNS=$(tput cols)
+            [[ -z ${COLUMNS:-} ]] && [[ -n $TERM ]] && command -v tput &>/dev/null && COLUMNS=$(tput -T $TERM cols)
             [[ -n ${COLUMNS:-} ]] && export COLUMNS
         fi
 
@@ -139,7 +139,7 @@ print_console()
         [[ -n $cr_start || -n ${GLOBAL_DO_LINE_CLEAR:-} ]] && str="\\x1B[2K\r$str"
         # append new line character
         [[ -n $nl ]] && str="$str\n"
-        printf "$str" > /dev/tty
+        printf "$str" # > /dev/tty - no tty in docker - TODO
         # set LINE_CLEAR flag for the next line
         GLOBAL_DO_LINE_CLEAR=
         [[ -n $cr_end ]] && GLOBAL_DO_LINE_CLEAR=1
