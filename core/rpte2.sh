@@ -5,6 +5,9 @@
 #
 set -eu -o pipefail
 
+dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
+. "$dirScript/message_q.sh"
+
 ENABLE_NAMED_PIPE=${ENABLE_NAMED_PIPE:-1}
 
 usage()
@@ -12,39 +15,46 @@ usage()
 	cat<<-\EOT
 	Parallel task executor in Bash.
 
-	This script reads a text file (testplan), where each line is a simple shell 
+	This script reads a text file (testplan), where each line is a simple shell
 	command. For each line, the substitution of shell variables is performed,
 	followed by the execution of the resulting expression. No more commands are
 	scheduled if execution failed. Instead, the stdout/stderr logs are printed
-	on the screen, all scheduled commands are waited to complete and script
+	on a screen, all scheduled commands are waited to complete and script
 	terminates with nonzero status.
 
 	Normally, only execution progress is displayed. Each task is executed with
 	the output streams redirected to a '$tempPath/$id.std{out,err}.log' files
-	where 'id' is an auto incremented number or an  unique tag specified as a
-	command prefix.
-
-	This script requires bash to use 'errexit' mode. Do not call it as a part
-	of composed shell command, see 'set -e' description at
-	https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html
+	where 'id' is an auto incremented task number.
 
 	Usage:
 	    rpte.sh <testplan> [options]
 
 	Options:
-	    -h|--help    Print this help
+	    -h,--help    Print this help
 	       --test    Run test
 	    -p <path>    Temporary path for stdout/stderr logs
 	    -j <n>       Maximum number of tasks running in parallel (default: 1)
 	                    =  0 - all CPUs
 	                    = -1 - all CPUs - 1    (i.e. reserve one core)
 	                    <  0 - all CPUs + |n|
-	    -d <char>    Task id delimiter: ':', ' ', ... . If not set, the Id is
-	                 generated automatically in the execution order (default: auto)
 	    -t <text>    Text message to append to stdout log for every executed task
 	    -f <flags>   Flags to append to a command line for every task
 EOT
 # 'R' for 'reliable'
+}
+
+check_msys_ver_lt() # !msys:REPLY='' msys:ver<=maj.min => REPLY=1/0
+{
+    local maj_max=${1%%.*}
+    local min_max=${1#$maj_max}; min_max=${min_max#.}
+    [[ -z "$min_max" ]] && min_max=0
+    case $(uname -a) in MSYS_NT-*) :;; *) REPLY=; return;; esac
+    REPLY=$(uname -r); REPLY=${REPLY%%-*}
+    local maj=${REPLY%%.*}; REPLY=${REPLY#$maj.}
+    local min=${REPLY%%.*}
+    REPLY=0
+    [[ $maj -lt $maj_max ]] && REPLY=1 || [[ $min -lt $min_max ]] && REPLY=1
+    return 0
 }
 
 entrypoint()
@@ -53,7 +63,14 @@ entrypoint()
 	[[ -n "$BUSYBOX" ]]             && ENABLE_NAMED_PIPE=0 # not supported
 	[[ -n "${KSH_VERSION:-}" ]]     && ENABLE_NAMED_PIPE=0 # not supported (Android shell)
 	[[ -n "${WSL_DISTRO_NAME:-}" ]] && ENABLE_NAMED_PIPE=0 # broken
+    check_msys_ver_lt 3.1
+    if [[ "$REPLY" == 1 ]]; then
+        echo "Please, update msys to version 3.1 or above:"\
+             "http://repo.msys2.org/distrib/msys2-x86_64-latest.tar.xz"
+        ENABLE_NAMED_PIPE=0
+    fi
 	readonly ENABLE_NAMED_PIPE
+    [[ $ENABLE_NAMED_PIPE == 0 ]] && echo "warning: multithreading execution disabled"
 
 	local do_test=false
 	for arg do
@@ -67,30 +84,31 @@ entrypoint()
 
 	if ! $do_test; then
 		jobsRunTasks "$@"
-		jobsGetStatus || return 1
 	else
-		cat <<-'EOF' > tasks.txt
-			echo hello1
-			#false
-			echo hello2
-			true
-			ping localhost
-			#false
-		EOF
-		jobsRunTasks tasks.txt -j2 -p tmp
-		jobsGetStatus || { echo "Complete with error" && return 1; }
-		echo "Success"
+        local i=0 N=20 self=$0
+		rm -rf tmp
+        echo "Scheduling $((N*10)) tasks..."
+        printf -v REPLY '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n # comment' \
+             true true true true true true true true true true
+        while [[ $i -lt $N ]]; do
+            i=$((i+1))
+            echo "$REPLY"
+        done > tasks.txt
+
+        local self=$0
+		if "$self" -p tmp -j4 tasks.txt; then
+            echo Success
+        else
+            echo "Complete with error"
+            return 1
+        fi
+        rm -f tasks.txt
 	fi
 }
 
 # Progress reported to stdout (since report progress on interrupt)
 # Errors are printed to stderr
-readonly ARG_DELIM=$'\004' # EOT (non-printable)
 readonly REPLY_EOF='-'
-jobsGetStatus()
-{	
-	return $(( __jobsInterruptCnt + __jobsErrorCnt ))
-}
 
 # Ping self to report execution progress till the statusPIPE opened
 jobsStartPing()
@@ -100,33 +118,13 @@ jobsStartPing()
 	local period=$1
 	{
 		trap 'return 0' INT
-		while echo "ping::0:" > $__jobsStatusPipe ; do
-			sleep $period			
-		done
-	} </dev/null 1>/dev/null 2>/dev/null &
-}
 
-pipeOpen() # always from worker
-{
-    local mode=$1; shift
-    local pipeName=$1; shift
-    if [[ $mode == w ]]; then
-        # Normally we need not open pipe manually when writing since bash should block write access till pipe is available.
-        # It looks like named pipes are not workable for WSL, WSL2 and broken for MSYS2 starting from rel 20200522,
-        # so we try to overcome this issue with more careful approach.
-        # Unfortunately, this does not help: We still observe lost and broken messages.
-    	while ! exec 3>$pipeName; do
-	    	[[ ! -e $pipeName ]] && return 1
-            debug_log worker "can't open the pipe, sleep for a second"
-		    sleep .1s
-    	done
-    else
-    	while ! exec 3<$pipeName; do
-		    [[ ! -e $pipeName ]] && return 1
-	    	sleep .1s
-    	done
-    fi
-    return 0
+        MQ_slave_create
+
+        while MQ_slave_write_status "ping::0:"; do
+			sleep $period
+        done
+	} </dev/null 1>/dev/null 2>/dev/null &
 }
 
 #
@@ -143,20 +141,15 @@ pipeOpen() # always from worker
 #
 executeSingleTask()
 {
-	local id=$1; shift	
+	local id=$1; shift
 	local cmd=$1; shift
 	local userText=$1; shift
-	local userFlags=$1; shift
-	local x=
-
-	# Append flags to command-line
-	cmd=$cmd${userFlags:+ "$userFlags"}
 
 	# Prepare command line
 	eval 'set -- $cmd'
-	for x; do shift;
-		x=$(eval printf "%s" "$x") # can't use 'echo' here due to '-e'
-		set -- "$@" "$x"
+	for REPLY; do shift;
+		x=$(eval printf "%s" "$REPLY") # can't use 'echo' here due to '-e'
+		set -- "$@" "$REPLY"
 	done
 
 	# Hack. Update cmd with evaluated parameters (just for debugging)
@@ -188,113 +181,86 @@ executeSingleTask()
 # thread exits.
 # Note, we intentionly does not check execution status explicitly. Instead, we
 # relies on Bash errexit mode which trigs exception on a Bash command failure.
-# We catch this exception with the EXIT signal trap. The reason for this 
+# We catch this exception with the EXIT signal trap. The reason for this
 # behaviour is that master process expects us a response for every tasks read
 # from a workPIPE (and exactly ONE response). When receiving any signal (ex.
 # Ctrl^C press) we check whether the task is currently running, and if running
 # we report fail execution status before leaving the process(self). In total,
 # for each request (task read) we report completion status once and report
-# additional 'process exit' status if we were interrupted. We report nothing 
+# additional 'process exit' status if we were interrupted. We report nothing
 # on normal process exit. We still may catch a race condition if interrupt
 # appears in between writing to the statusPIPE and clearing the 'runningTaskId'
 # variable.
 debug_log_init()
 {
-    local type=$1; shift
-    local logfile=
-    if [[ $type == worker ]]; then
-    	logfile=$tempPath/$BASHPID.worker.log
-    else
-    	logfile=$tempPath/master.log
-    fi
-	rm -f "$logfile"
+    local type=$1 logfile=
+    [[ $type == worker ]] && logfile=worker.$BASHPID.log || logfile=master.log
+	rm -f "$tempPath/$logfile"
 }
 debug_log()
 {
-    local type=$1; shift
-    local logfile=
-    if [[ $type == worker ]]; then
-    	logfile=$tempPath/$BASHPID.worker.log
-    else
-    	logfile=$tempPath/master.log
-    fi
-    echo "$@" >> $logfile
+    local type=$1 logfile=
+    [[ $type == worker ]] && logfile=worker.$BASHPID.log || logfile=master.log
+    echo "$@" >> $tempPath/$logfile
 }
+debug_log_master() { debug_log master "$@"; }
+debug_log_worker() { debug_log worker "$@"; }
+
 jobsStartWorker()
 {
 	[[ $ENABLE_NAMED_PIPE != 1 ]] && return 1
 
-	local -
 	set -eu
 
-	local id=$1; shift
-	local cmd=$1; shift
 	local userText=$1; shift
-	local userFlags=$1; shift
 
 	local runningTaskId=
 	local runningTaskCmd=
+    local workDone=
+
+    MQ_slave_create debug_log_worker
+    MQ_slave_init_taskPump
+
 	onWorkerExit() {
 		local error_code=0
 		[[ -n "$runningTaskId" ]] && error_code=1
+		[[ -n "$workDone" ]] && error_code=0
 
-        debug_log worker "Try exit with error_code=$error_code"
+        debug_log_worker "exit: id=$runningTaskId workDone=$workDone error_code=$error_code"
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        if ! pipeOpen "w" "$__jobsStatusPipe"; then
-            echo "on_exit: can't report error status, pipe closed" >&2
-            debug_log worker "Status NOT reported"
-        else
-	    	echo "$BASHPID:$runningTaskId:$error_code:$runningTaskCmd" >&3
-    		exec 3>&-;
-            debug_log worker "Status reported"
-        fi
+        MQ_slave_write_status "$BASHPID:id=$runningTaskId:$error_code:$runningTaskCmd"
+
+        debug_log_worker "Done"
 		exit $error_code
 	}
 	trap onWorkerExit EXIT
 
-	# Continue reading while pipe exist
 	while : ; do
-		runningTaskId=$id
-		runningTaskCmd=$cmd${userFlags:+ "$userFlags"}
 
-        debug_log worker "Exec: id=$id cmd=[$cmd]"
-       	executeSingleTask "$id" "$cmd" "$userText" "$userFlags"
+        MQ_slave_read_task
 
-		# Report successful status since exit trap is expected to trig on failure
-		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        if ! pipeOpen "w" "$__jobsStatusPipe"; then
-			echo "main_loop: can't report success status, pipe closed" >&2
-            debug_log worker "Status NOT reported"
+		local id=${REPLY%%:*} cmd=${REPLY#*:}
+        id=${id#id=}
+        if [[ "$cmd" == $REPLY_EOF ]]; then
+        	debug_log_worker "no more tasks: $cmd"
             break
-        else
-    		echo "$BASHPID:$runningTaskId:0:$runningTaskCmd" >&3
-	    	exec 3>&-;
-        fi
+		fi
+
+		runningTaskId=$id
+		runningTaskCmd=$cmd
+    	debug_log_worker "E id=$id cmd=[$cmd]"
+       	executeSingleTask "$id" "$cmd" "$userText"
 		runningTaskId=
 		runningTaskCmd=
 
-		# Open for reading (prevent 'Device or resource busy' error)
-        if ! pipeOpen "r" "$__jobsWorkPipe"; then
-            debug_log worker "workPipe closed"
-            break
-        else
-	    	# do not break execution on read error
-    		if ! readNewTask ':' <&3; then
-		    	REPLY=
-	    	fi
-    		exec 3>&-;
-        fi
+        MQ_slave_write_status "$BASHPID:id=$id:0:$cmd"
 
-		if [[ -z "$REPLY" ]]; then
-            debug_log worker "no more tasks"
-			break
-		fi
-		id=${REPLY%$ARG_DELIM*}
-		cmd=${REPLY#*$ARG_DELIM}
-	done
-    debug_log worker "exit main loop"
-	trap - EXIT
+    done
+    debug_log_worker "exit main loop"
+
+    workDone=1
+    exit 0
 }
 
 # unicode characters
@@ -392,57 +358,22 @@ jobsReportTaskFail()
 	fi
 }
 
-# Read ID and CMD for the next task from stdin.
-# (ID is only read if delimiter argument set)
-#
-# Return value is a REPLY variable in a form of "$id$ARG_DELIM$cmd"
-# Emty return value signals the end of the task list.
-readNewTask() 				
-{
-	local delim=$1; shift
-	while read -r; do   # Remove leading and trailing whitespaces
-		local x=$REPLY; x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}; REPLY=$x
-		case $REPLY in '#'*) continue;; esac # comment
-		[[ -z "$REPLY" ]] && continue
-		if [[ "$REPLY" == $REPLY_EOF ]]; then
-			REPLY=
-			return
-		fi
-
-		local id= cmd=$REPLY
-		if [[ -n "$delim" ]]; then
-			id=${REPLY%%$delim*}
-			cmd=${REPLY#"$id$delim"}
-			[[ "$id" == "$REPLY" ]] && echo "error: can't parse task id from '$REPLY' with delim '$delim'" >&2 && return 1
-			x=$id;  x=${x%"${x##*[! $'\t']}"}; id=$x
-			x=$cmd; x=${x#"${x%%[! $'\t']*}"}; cmd=$x
-		fi
-		# make sure $cmd is not empty
-		if [[ -n "$cmd" ]]; then
-			REPLY=$id$ARG_DELIM$cmd
-			return
-		fi
-	done
-	REPLY=
-}
-
+tempPath=.
 jobsRunTasks()
 {
-	local -
 	set -eu
 
-	local taskTxt= delim= tempPath=. logLevel= runMax=1 userText= userFlags=
+	local taskTxt= logLevel= runMax=1 userText= userFlags=
 	# set all 'kw' args to "-k v" form (accepted input: -kv | -k=v | -k v)
 	while [[ $# != 0 ]]; do
 		local i=$1 v; shift
-		case $i in -*) v=${i:2}; i=${i:0:2}; v=${v#=}; 
+		case $i in -*) v=${i:2}; i=${i:0:2}; v=${v#=};
 			if [[ -z "$v" ]]; then
 				[[ $# == 0 ]] && echo "error: argument required for '$i' option" >&2 && return 1
 			 	v=$1; shift;
-			fi 
+			fi
 		esac
 		case $i in
-			-d*) delim=$v;;
 			-p*) tempPath=$v;;
 			-l*) logLevel=$v;;
 			-j*) runMax=$v;; # 0 => all CPUs, < 0 => nCPU+|x|
@@ -492,34 +423,38 @@ jobsRunTasks()
 	__jobsDoneMax=0
 	__jobsStartSec=$SECONDS
 	__jobsDisplay=
+
     # Count jobs number
-	while readNewTask "$delim"; do
-		[[ -z "$REPLY" ]] && break
+    local testPlan=$tempPath/tasks.$$.txt
+    rm -f $testPlan
+	while read -r; do   # Remove leading and trailing whitespaces
+		local x=$REPLY; x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}; REPLY=$x
+		case $REPLY in '#'*) continue;; esac # comment
+		[[ -z "$REPLY" ]] && continue
 		__jobsDoneMax=$(( __jobsDoneMax + 1 ))
-	done <"$taskTxt"
+        echo "$REPLY${userFlags:+ $userFlags}"
+	done <$taskTxt >$testPlan
 
 	#
 	# Single-threaded
 	#
 	if [[ $ENABLE_NAMED_PIPE != 1 ]]; then
-		while readNewTask "$delim"; do
+		while read -r; do
 			[[ -z "$REPLY" ]] && break
-			local id=${REPLY%$ARG_DELIM*}
-			local cmd=${REPLY#*$ARG_DELIM}
-			[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
-
-			__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
+            local id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ))
+			local cmd=$REPLY
+			__jobsDisplay=$id:$cmd
 			__jobsRunning=1
 			jobsReportProgress
 
-			if ! executeSingleTask "$id" "$cmd" "$userText" "$userFlags"; then
+			if ! executeSingleTask $id "$cmd" "$userText"; then
 				__jobsDone=$(( __jobsDone + 1 ))
 				__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
 				jobsReportTaskFail "$id" 1 "$cmd" >&2
 				break;
 			fi
 			__jobsDone=$(( __jobsDone + 1 ))
-		done <"$taskTxt"
+		done <$testPlan
 		__jobsNoMoreTasks=1
 		__jobsRunning=0
 		jobsReportProgress
@@ -534,9 +469,10 @@ jobsRunTasks()
 		# most likely stderr is redirected to /dev/null at this moment
 		[[ $__jobsInterruptCnt == 0 && $__jobsErrorCnt == 0 ]] && __jobsTermReasonInt=1
 		__jobsInterruptCnt=$(( __jobsInterruptCnt + 1 ))
+
 		# unblock everything
-		rm -f -- $__jobsStatusPipe # need abspath to a 'pipe' since 'pwd' is unpredictable here
-		rm -f -- $__jobsWorkPipe
+        MQ_master_destroy
+
 		if [[ -n "$__jobsPingPid" ]]; then
 			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 2>/dev/null
 			__jobsPingPid=
@@ -551,150 +487,145 @@ jobsRunTasks()
 		return 0
 	}
 	jobsOnEXIT() {
+
 		exec 4<&- # hard-coded fd
 
-		rm -f -- $__jobsStatusPipe # need abspath to a 'pipe' since 'pwd' is unpredictable here
-		rm -f -- $__jobsWorkPipe
+        MQ_master_destroy
 
 		if [[ -n "$__jobsPingPid" ]]; then
 			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 1>/dev/null  2>/dev/null
 		fi
 		if [[ -n "$__jobsPid" ]]; then
-			echo "warn: waiting for unfinished jobs: $__jobsPid"
+			debug_log_master "waiting for unfinished jobs: $__jobsPid"
 			{ kill -s TERM $__jobsPid && wait $__jobsPid || true; } >/dev/null
 		fi
-		# due to previous 'rm' the worker may create file '$__jobsStatusPipe' on status report
-		rm -f -- $__jobsStatusPipe
+
+		# due to previous 'rm' the worker may create file with a pipe name on status report
+        MQ_master_destroy
 
 		{ jobsReportProgress; echo ""; }
+
+        local exit_status=0
+        [[ $__jobsInterruptCnt != 0 || $__jobsErrorCnt != 0 ]] && exit_status=1
+        exit $exit_status
 	}
 
-	readonly __jobsStatusPipe="$tempPath/pipe_status.$$"
-	readonly __jobsWorkPipe="$tempPath/pipe_work.$$"
 	__jobsPid=
 
-	rm -f -- $__jobsStatusPipe $__jobsWorkPipe
-	mkfifo $__jobsStatusPipe
-	mkfifo $__jobsWorkPipe
+    MQ_master_create debug_log_master
 
 	jobsStartPing .3s
 	__jobsPingPid=$!
 
+    MQ_master_init_statusPump
+
 	trap 'jobsOnINT' INT
 	trap 'jobsOnEXIT' EXIT
 
-	exec 4<"$taskTxt" # hard-coded fd
-
-	while [ $__jobsRunning -lt $runMax ]; do
-
-		readNewTask "$delim" <&4
+	exec 4<$testPlan # hard-coded fd
+	while [[ $__jobsRunning -lt $runMax ]]; do
+        REPLY=
+		read -r -u 4 || true
 		[[ -z "$REPLY" ]] && break;
-		local id=${REPLY%$ARG_DELIM*}
-		local cmd=${REPLY#*$ARG_DELIM}
-		[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
+		local id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ));
+		local cmd=$REPLY
 
-		jobsStartWorker "$id" "$cmd" "$userText" "$userFlags" 4<&- &
-		debug_log master "jobsStartWorker $id pid=$!"
+		jobsStartWorker "$userText" 4<&- &
+		debug_log_master "jobsStartWorker $id pid=$!"
 
 		__jobsPid="$__jobsPid $!"
-		__jobsDisplay=$id:$cmd${userFlags:+ $userFlags}
+		__jobsDisplay=$id:$cmd
 		__jobsRunning=$(( __jobsRunning + 1 ))
+
+        jobsReportProgress
+
+        MQ_master_write_task "id=$id:$cmd"
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
 	setWorkerGone() {
-		local pid=$1 x=; shift
-		debug_log master "setWorkerGone pid=$pid [start waiting pid]"
+		local pid=$1; shift
+		debug_log_master "setWorkerGone pid=$pid [start waiting pid]"
 
 		{ wait $pid || true; } 2>/dev/null  # may have already gone
 
 		set -- $__jobsPid; # remove from wait list
-		for x; do shift; if [[ $x != $pid ]]; then set -- "$@" $x; fi; done
+		for REPLY; do shift; if [[ $REPLY != $pid ]]; then set -- "$@" $REPLY; fi; done
 		__jobsPid="$@"
 		__jobsRunning=$((__jobsRunning - 1))		# worker exit
 
-		debug_log master "setWorkerGone pid=$pid [onchain $__jobsPid]"
+		debug_log_master "setWorkerGone pid=$pid [onchain $__jobsPid]"
 	}
 
+    local id_done=0
 	while : ; do
-		local pid # <- long live variable
 		# Until have workers running
 		while [[ $__jobsRunning != 0 ]]; do
 			jobsReportProgress
 
-			# Check feedback pipe still alived and not get destroyed on interrupt
-			[[ ! -e $__jobsStatusPipe ]] && break
+            # Single reader, multiple writers
+            # https://unix.stackexchange.com/questions/450713/named-pipes-file-descriptors-and-eof/450715#450715
+            # https://stackoverflow.com/questions/8410439/how-to-avoid-echo-closing-fifo-named-pipes-funny-behavior-of-unix-fifos/8410538#8410538
+            REPLY=
+            while [[ -z "$REPLY" ]]; do
+                MQ_master_read_status
+    			case $REPLY in ping:*) jobsReportProgress; REPLY=; esac
+            done
 
-			# Only extract one message per pipe read access (i.e. not reading from 'fd' in a loop).
-			# This case we will have 'read' blocked till message appeared in a pipe.
-			# The return status is always expected to be zero with the exception for the interrupt.
-			read -r 2>/dev/null <$__jobsStatusPipe || continue
-
-			# This is a 'ping' - skip it
-			case $REPLY in ping:*) continue; esac
-			debug_log master "statusUpdate: $REPLY"
-
-			# This is a status report - parse it
-			local id status data x
-			x=$REPLY
+            local msg=$REPLY
+            REPLY=$msg
+			local pid id status data x
 			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; pid=$x
 			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; id=$x  # maybe empty
 			x=${REPLY%%:*}; REPLY=${REPLY#$x:}; status=$x
-			data=$x
+			data=$REPLY
+            id=${id#id=}
 			if [[ -z "$id" ]]; then
-				setWorkerGone $pid; pid= # worker exit due to interrupt
+                # Worker exit (maybe interrupted), we have nothing to do with completion status here
+                setWorkerGone $pid
 			else
-				debug_log master "jobsDone id=$id pid=$pid status=$status"
+				debug_log_master "jobsDone id=$id pid=$pid status=$status"
 
 				__jobsDone=$(( __jobsDone + 1 ))
 				if [[ "$status" != 0 ]]; then
-					setWorkerGone $pid; pid= # worker exit due to task fail
+					setWorkerGone $pid; # worker exit due to task fail
 
 					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
 					jobsReportTaskFail "$id" $status "$data" >&2
+                else
+                    break # must reply on this message
 				fi
 			fi
-			[[ -n "$pid" ]] && break; # worker is waiting us a new task
 		done
-		jobsReportProgress
+        jobsReportProgress
+
+        debug_log_master "start reply"
 
 		# Time to leave if no workers alive
 		[[ $__jobsRunning == 0 ]] && break;
 
-		if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
-			readNewTask "$delim" <&4
+        REPLY=
+	    if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
+			read -r -u 4 || true
 			[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1
+    	fi
+		local id= cmd=
+		if [[ -z "$REPLY" ]]; then
+			id=$id_done
+			cmd=$REPLY_EOF
+			id_done=$(($id_done+1))
 		else
-			REPLY=
+    		id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ));
+            cmd=$REPLY
 		fi
-		local id=${REPLY%$ARG_DELIM*}    # ok if empty id / cmd
-		local cmd=${REPLY#*$ARG_DELIM}   #
+		__jobsDisplay=$id:$cmd
 
-		local task;
-		# Reply with EOF message if no task was read
-		if [[ -z "$cmd" ]]; then
-			task=$REPLY_EOF
-			__jobsDisplay="no more tasks to schedule"
-		else
-			pid= # leave worker alive
-			[[ -n "$id" ]] || { id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 )); }
-			task=$id:$cmd
-			__jobsDisplay=$task${userFlags:+ $userFlags}
-		fi
 		jobsReportProgress
-		echo "$task" 2>/dev/null >$__jobsWorkPipe
-		debug_log master "newTask: $task"
 
-		if [[ -n "$pid" ]]; then
-			setWorkerGone $pid; pid=; # worker exit
-		fi
+        MQ_master_write_task "id=$id:$cmd"
 	done
 
-	trap - INT
-	trap - EXIT 
-
-	# Do cleanup
-	jobsOnEXIT || true
+    debug_log_master "exit main loop"
 }
 
 entrypoint "$@"
