@@ -104,7 +104,7 @@ entrypoint()
 
 		local wmax=0
 		if command -v tput &>/dev/null; then
-			if [[ -t 1 ]]; then
+			if [[ -t 1 && -n $TERM ]]; then
 				wmax=$(tput cols)
 				wmax=$(( wmax - 63))
 			fi
