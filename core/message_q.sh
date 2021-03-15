@@ -3,7 +3,7 @@
 # Licensed under the Apache License, Version 2.0
 #
 
-message_q_usage()
+MQ_message_q_usage()
 {
 	cat<<-\EOT
 This file exposes two message queues so that the main process can communicate
@@ -21,11 +21,11 @@ MASTER() {                         /------>|SLAVE() {
                                    .       |
     # Run workers in a background  .       |
     for numWorkers                 .       |
-        SLAVE & >------------------/     /-|--> slave_init_taskPump
-    done                                 . |
-                                   unblock |
-    for numWorkers                       . |
-        master_write_task $initialTask >-/ |     
+        SLAVE & >------------------/ /-----|--> slave_init_taskPump
+    done                             .     |
+                                  unblock  |
+    for numWorkers                   .     |
+        master_write_task $task >----/     |     
     done                                   |
                                            |    while true; do
                                            |        slave_read_task
@@ -36,7 +36,7 @@ MASTER() {                         /------>|SLAVE() {
                                            |}
     for numTasks
         master_read_status
-        master_write_task
+        master_write_task $task
     done
 
     for numWorkers
@@ -48,76 +48,76 @@ MASTER() {                         /------>|SLAVE() {
 EOT
 }
 
-PIPE_STATUS=
-PIPE_TASK=
-PIPE_LOGGER=
-master_create()
+MQ_PIPE_STATUS=
+MQ_PIPE_TASK=
+MQ_PIPE_LOGGER=
+MQ_master_create()
 {
-    PIPE_LOGGER=${1:-}
-    export PIPE_STATUS=/tmp/mq_status.$$
-    export PIPE_TASK=/tmp/mq_task.$$
-    for REPLY in $PIPE_STATUS $PIPE_TASK; do
+    MQ_PIPE_LOGGER=${1:-}
+    export MQ_PIPE_STATUS=/tmp/mq_status.$$
+    export MQ_PIPE_TASK=/tmp/mq_task.$$
+    for REPLY in $MQ_PIPE_STATUS $MQ_PIPE_TASK; do
         rm -f -- $REPLY
         mkfifo $REPLY
         touch $REPLY.lock
     done
 }
-master_destroy()
+MQ_master_destroy()
 {
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status destroy";     rm -f -- $PIPE_STATUS
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status destroed";     
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I task destroy";       rm -f -- $PIPE_TASK
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status destroed";     
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "I status destroy";     rm -f -- $MQ_PIPE_STATUS
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "I status destroed";     
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "I task destroy";       rm -f -- $MQ_PIPE_TASK
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "I status destroed";     
 }
-master_init_statusPump()
+MQ_master_init_statusPump()
 {
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status open";        exec 9<$PIPE_STATUS
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I status opened";     
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "I status open";        exec 9<$MQ_PIPE_STATUS
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "I status opened";     
 }
-master_read_status()
+MQ_master_read_status()
 {
     local msg
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r status reading";     while ! read -r -u 9 msg; do :; done
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r status read [$msg]"
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "r status reading";     while ! read -r -u 9 msg; do :; done
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "r status read [$msg]"
     REPLY=$msg
 }
-master_write_task()
+MQ_master_write_task()
 {
     local msg=$1
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w task write [$msg]";  echo "$msg" >$PIPE_TASK
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w task written";
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w task write [$msg]";  echo "$msg" >$MQ_PIPE_TASK
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w task written";
 }
 
-slave_create()
+MQ_slave_create()
 {
-    PIPE_LOGGER=${1:-}
+    MQ_PIPE_LOGGER=${1:-}
 }
-slave_init_taskPump()
+MQ_slave_init_taskPump()
 {    
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I task open";          exec 9<$PIPE_TASK
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "I task opened";     
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "I task open";          exec 9<$MQ_PIPE_TASK
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "I task opened";     
 }
-slave_read_task()
+MQ_slave_read_task()
 {
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task lock open";     exec 8>$PIPE_TASK.lock    
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task lock";          flock 8
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task locked";        while ! read -r -u 9 msg; do :; done
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task read [$msg]";   flock -u 8
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "r task unlocked";      exec 8<&-
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "r task lock open";     exec 8>$MQ_PIPE_TASK.lock    
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "r task lock";          flock 8
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "r task locked";        while ! read -r -u 9 msg; do :; done
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "r task read [$msg]";   flock -u 8
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "r task unlocked";      exec 8<&-
     REPLY=$msg
 }
-slave_write_status()
+MQ_slave_write_status()
 {
     local msg=$1
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w status [$msg]";
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w status lock open";   exec 8>$PIPE_STATUS.lock
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w status lock]";       flock 8
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w status locked";      echo "$msg" > $PIPE_STATUS
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w status write";       flock -u 8
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w status written";     exec 8<&-
-    [[ -n "$PIPE_LOGGER" ]] && $PIPE_LOGGER "w status unlocked";    
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w status [$msg]";
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w status lock open";   exec 8>$MQ_PIPE_STATUS.lock
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w status lock]";       flock 8
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w status locked";      echo "$msg" > $MQ_PIPE_STATUS
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w status write";       flock -u 8
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w status written";     exec 8<&-
+    [[ -n "$MQ_PIPE_LOGGER" ]] && $MQ_PIPE_LOGGER "w status unlocked";    
 }
 
-if [[ "$(basename ${BASH_SOURCE-url.sh})" == "$(basename $0)" ]]; then
-	message_q_usage "$@"
+if [[ "$(basename ${BASH_SOURCE-message_q.sh})" == "$(basename $0)" ]]; then
+	MQ_message_q_usage "$@"
 fi

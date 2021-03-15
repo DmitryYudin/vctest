@@ -97,9 +97,9 @@ jobsStartPing()
 	{
 		trap 'return 0' INT
 
-        slave_create
+        MQ_slave_create
 
-        while slave_write_status "ping::0:"; do            
+        while MQ_slave_write_status "ping::0:"; do            
 			sleep $period
         done
 	} </dev/null 1>/dev/null 2>/dev/null &
@@ -196,8 +196,8 @@ jobsStartWorker()
 	local runningTaskCmd=
     local workDone=
 
-    slave_create debug_log_worker
-    slave_init_taskPump
+    MQ_slave_create debug_log_worker
+    MQ_slave_init_taskPump
 
 	onWorkerExit() {
 		local error_code=0
@@ -207,7 +207,7 @@ jobsStartWorker()
         debug_log_worker "exit: id=$runningTaskId workDone=$workDone error_code=$error_code"
 
 		# open pipe first to avoid 'echo: write error: Broken pipe' message
-        slave_write_status "$BASHPID:id=$runningTaskId:$error_code:$runningTaskCmd"
+        MQ_slave_write_status "$BASHPID:id=$runningTaskId:$error_code:$runningTaskCmd"
 
         debug_log_worker "Done"
 		exit $error_code
@@ -216,7 +216,7 @@ jobsStartWorker()
 
 	while : ; do
 		# read everthing from pipe to get no messages lost
-        slave_read_task
+        MQ_slave_read_task
 
 		local id=${REPLY%%:*} cmd=${REPLY#*:}
         id=${id#id=}
@@ -232,7 +232,7 @@ jobsStartWorker()
 		runningTaskId=
 		runningTaskCmd=
 
-        slave_write_status "$BASHPID:id=$id:0:$cmd"
+        MQ_slave_write_status "$BASHPID:id=$id:0:$cmd"
 
     done
     debug_log_worker "exit main loop"
@@ -447,8 +447,9 @@ jobsRunTasks()
 		# most likely stderr is redirected to /dev/null at this moment
 		[[ $__jobsInterruptCnt == 0 && $__jobsErrorCnt == 0 ]] && __jobsTermReasonInt=1
 		__jobsInterruptCnt=$(( __jobsInterruptCnt + 1 ))
+
 		# unblock everything
-        master_destroy
+        MQ_master_destroy
 
 		if [[ -n "$__jobsPingPid" ]]; then
 			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 2>/dev/null
@@ -467,7 +468,7 @@ jobsRunTasks()
 
 		exec 4<&- # hard-coded fd
 
-        master_destroy
+        MQ_master_destroy
 
 		if [[ -n "$__jobsPingPid" ]]; then
 			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 1>/dev/null  2>/dev/null
@@ -478,7 +479,7 @@ jobsRunTasks()
 		fi
 
 		# due to previous 'rm' the worker may create file with a pipe name on status report
-        master_destroy
+        MQ_master_destroy
 
 		{ jobsReportProgress; echo ""; }
 
@@ -489,12 +490,12 @@ jobsRunTasks()
 
 	__jobsPid=
 
-    master_create debug_log_master
+    MQ_master_create debug_log_master
 
 	jobsStartPing .3s
 	__jobsPingPid=$!
 
-    master_init_statusPump
+    MQ_master_init_statusPump
 
 	trap 'jobsOnINT' INT
 	trap 'jobsOnEXIT' EXIT
@@ -516,7 +517,7 @@ jobsRunTasks()
 
         jobsReportProgress
 
-        master_write_task "id=$id:$cmd"
+        MQ_master_write_task "id=$id:$cmd"
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
@@ -545,7 +546,7 @@ jobsRunTasks()
             # https://stackoverflow.com/questions/8410439/how-to-avoid-echo-closing-fifo-named-pipes-funny-behavior-of-unix-fifos/8410538#8410538
             REPLY=
             while [[ -z "$REPLY" ]]; do
-                master_read_status
+                MQ_master_read_status
     			case $REPLY in ping:*) jobsReportProgress; REPLY=; esac
             done
 
@@ -599,7 +600,7 @@ jobsRunTasks()
 
 		jobsReportProgress
 
-        master_write_task "id=$id:$cmd"
+        MQ_master_write_task "id=$id:$cmd"
 	done
 
     debug_log_master "exit main loop"
