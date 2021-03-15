@@ -42,12 +42,32 @@ EOT
 # 'R' for 'reliable'
 }
 
+check_msys_ver_lt() # !msys:REPLY='' msys:ver<=maj.min => REPLY=1/0
+{
+    local maj_max=${1%%.*}
+    local min_max=${1#$maj_max}; min_max=${min_max#.}
+    [[ -z "$min_max" ]] && min_max=0
+    case $(uname -a) in MSYS_NT-*) :;; *) REPLY=; return;; esac
+    REPLY=$(uname -r); REPLY=${REPLY%%-*}
+    local maj=${REPLY%%.*}; REPLY=${REPLY#$maj.}
+    local min=${REPLY%%.*}
+    REPLY=0
+    [[ $maj -lt $maj_max ]] && REPLY=1 || [[ $min -lt $min_max ]] && REPLY=1
+    return 0
+}
+
 entrypoint()
 {
 	local BUSYBOX=$(cat --help 2>&1 | head -1 | grep BusyBox) || true
 	[[ -n "$BUSYBOX" ]]             && ENABLE_NAMED_PIPE=0 # not supported
 	[[ -n "${KSH_VERSION:-}" ]]     && ENABLE_NAMED_PIPE=0 # not supported (Android shell)
 	[[ -n "${WSL_DISTRO_NAME:-}" ]] && ENABLE_NAMED_PIPE=0 # broken
+    check_msys_ver_lt 3.1
+    if [[ "$REPLY" == 1 ]]; then
+        echo "Please, update msys to version 3.1 or above:"\
+             "http://repo.msys2.org/distrib/msys2-x86_64-latest.tar.xz"
+        ENABLE_NAMED_PIPE=0
+    fi
 	readonly ENABLE_NAMED_PIPE
     [[ $ENABLE_NAMED_PIPE == 0 ]] && echo "warning: multithreading execution disabled"
 
