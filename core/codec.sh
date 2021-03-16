@@ -187,7 +187,7 @@ codec_cmdDst()
 }
 codec_verify()
 {
-	local remote=$1; shift
+	local transport=$1; shift
 	local target=$1; shift
 	local CODECS="$*" codecId= cmd= codecEnabled= encExe= codecRemoved=
 	local dirOut=$(mktemp -d)
@@ -205,7 +205,7 @@ codec_verify()
             codecRemoved="$codecRemoved $codecId"
 			continue
 		fi
-		if ! $remote; then
+		if [[ $transport == local || $transport == condor ]]; then
 			local cmd=$DIR_BIN/$encExe
 			# temporary hack, for backward compatibility (remove later)
 			if [[ $codecId == h265demo ]]; then
@@ -231,7 +231,7 @@ codec_verify()
 	rm -rf -- "$dirOut"
 	trap - EXIT
 
-	if $remote; then
+	if [[ $transport == adb || $transport == ssh ]]; then
 		# Push executable (folder content) on a target device
 		local remoteDirBin
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin

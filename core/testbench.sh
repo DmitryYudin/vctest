@@ -83,7 +83,7 @@ entrypoint()
     update_PATH $dirScript/../bin
     export PATH
 
-    local target remote=false
+    local target transport=local
     case ${OS:-} in
         *_NT) target=${target:-windows};;
         *) target=${target:-linux};;
@@ -104,8 +104,8 @@ entrypoint()
 			   --preset) 	cmd_presets=$2;;
 			-j|--ncpu)		cmd_ncpu=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
-			   --adb)       target=adb; remote=true; nargs=1;;
-			   --ssh)       target=ssh; remote=true; nargs=1;;
+			   --adb)       target=adb; transport=adb; nargs=1;;
+			   --ssh)       target=ssh; transport=ssh; nargs=1;;
                --force)     force=1; nargs=1;;
                --decode)    decode=1; nargs=1;;
                --parse)     parse=1; nargs=1;;
@@ -139,7 +139,7 @@ entrypoint()
         [[ $numPresets -gt 1 ]] && error_exit "only single preset option allowed if multple codecs specified"
     fi
 
-	if $remote; then
+	if [[ $transport == adb || $transport == ssh ]] ; then
 		TARGET_setTarget $target "$dirScript"/../remote.local
 		TARGET_getFingerprint; targetInfo=$REPLY
 	fi
@@ -152,10 +152,10 @@ entrypoint()
 	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
 
 	# Remove non-existing and set abs-path
-	vectors_verify $remote $VECTORS; VECTORS=$REPLY
+	vectors_verify $transport $VECTORS; VECTORS=$REPLY
 
 	# Remove codecs we can't run
-	codec_verify $remote $target $CODECS; CODECS=$REPLY
+	codec_verify $transport $target $CODECS; CODECS=$REPLY
     [[ -z "$CODECS" ]] && error_exit "no codecs to test"
 
 	local startSec=$SECONDS
@@ -183,7 +183,7 @@ entrypoint()
 			encode=true
 		elif [[ $NCPU -eq 1 && ! -f "$outputDir/cpu.log" ]]; then
 			# cpu load monitoring is currently disabled for a remote run
-			[[ $target == windows ]] && ! $remote && encode=true  # update CPU log
+			[[ $target == windows && $transport == local ]] && encode=true  # update CPU log
 		fi
 		if $encode; then
 			# clean up target directory if we need to start from a scratch
@@ -231,7 +231,7 @@ entrypoint()
         local cpumon=
         [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon="--mon"
 		for outputDirRel in $encodeList; do
-			echo "$self --ncpu $NCPU $cpumon -- encode_single_file $remote $outputDirRel"
+			echo "$self --ncpu $NCPU $cpumon -- encode_single_file $transport $outputDirRel"
 		done > $testplan
 		execute_plan $testplan $NCPU
 	fi
@@ -282,8 +282,7 @@ entrypoint()
 	#
 	# Reporting
 	#
-	local info=$target
-	$remote && info="$info [remote]" || info="$info [local]"
+	local info="$target [$transport]"
 	[[ -n "$targetInfo" ]] && info="$info [$targetInfo]"
 	progress_begin "[5/5] Reporting..."	"$reportList"
 	if [[ -z "$hide_banner" ]]; then
@@ -306,7 +305,7 @@ entrypoint()
 
 vectors_verify()
 {
-	local remote=$1; shift
+	local transport=$1; shift
 	local VECTORS="$*"
 
 	local VECTORS_REL= vec=
@@ -320,7 +319,7 @@ vectors_verify()
 	done
 	VECTORS=${VECTORS_REL# }
 
-	if $remote; then
+	if [[ $transport == adb || $transport == ssh ]]; then
 		local remoteDirVec= targetDirPrev=
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
 		print_console "Push vectors to remote machine $remoteDirVec ...\n"
@@ -605,7 +604,7 @@ report_single_file()
 
 encode_single_file()
 {
-	local remote=$1; shift
+	local transport=$1; shift
 	local outputDirRel=$1; shift
 	local outputDir="$DIR_OUT/$outputDirRel"
 	pushd "$outputDir"
@@ -620,15 +619,17 @@ encode_single_file()
 	dict_getValue "$info" dst; dst=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
-	if ! $remote; then
+	if [[ $transport == local ]]; then
         encExe=$DIR_BIN/$encExe
         src=$DIR_VEC/$src
-    else
+	elif [[ $transport == adb || $transport == ssh ]]; then
 		local remoteDirBin= remoteDirVec=
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
 		encExe=$remoteDirBin/$encExe
 		src=$remoteDirVec/$src
+    else
+        error_exit "encoding with transport=$transport not implemented" >&2
 	fi
 	codec_cmdSrc $codecId "$src"; encCmdSrc=$REPLY
 	codec_cmdDst $codecId "$dst"; encCmdDst=$REPLY
@@ -644,7 +645,7 @@ encode_single_file()
 	local cpuLog=cpu.log
 	local fpsLog=fps.log
 
-	if ! $remote; then
+	if [[ $transport == local ]]; then
 		# temporary hack, for backward compatibility (remove later)
 		[[ $codecId == h265demo ]] && echo "" > h265demo.cfg
 
@@ -678,7 +679,7 @@ encode_single_file()
 			stop_cpu_monitor
 			trap - EXIT
 		fi
-	else
+	elif [[ $transport == adb || $transport == ssh ]]; then
 		local remoteDirOut remoteOutputDir
 		TARGET_getDataDir; remoteDirOut=$REPLY/vctest/out
 		remoteOutputDir=$remoteDirOut/$outputDirRel
@@ -728,6 +729,8 @@ encode_single_file()
 		"
 		TARGET_pull $remoteOutputDir/. .
 		TARGET_exec "rm -rf $remoteOutputDir"
+    else
+        error_exit "encoding with transport=$transport not implemented" >&2
 	fi
 	date "+%Y.%m.%d-%H.%M.%S" > encoded.ts
 
