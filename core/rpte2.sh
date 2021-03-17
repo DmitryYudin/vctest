@@ -7,6 +7,7 @@ set -eu -o pipefail
 
 dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 . "$dirScript/message_q.sh"
+. "$dirScript/progress_bar.sh"
 
 ENABLE_NAMED_PIPE=${ENABLE_NAMED_PIPE:-1}
 
@@ -264,77 +265,6 @@ jobsStartWorker()
 }
 
 # unicode characters
-readonly symTopDn=$'\xc2\xbf' symUp=$'\xcb\x84' symDn=$'\xcb\x85' symInf=$'\xe2\x88\x9e'
-readonly symCheck=$'\xe2\x88\x9a' symSun=$'\xe2\x98\xbc' symSmile=$'\xe2\x98\xba' symExcl=$'\xe2\x80\xbc'
-pbar_getStatus()
-{
-	REPLY=$symSun
-	[[ $__jobsNoMoreTasks != 0 ]] && { [[ $__jobsRunning != 0 ]] && REPLY=$symSmile || REPLY=$symCheck; }
-	[[ $__jobsErrorCnt != 0 || $__jobsInterruptCnt != 0 ]] && REPLY=$symExcl
-	return 0
-}
-pbar_getAnim()
-{
-#	local pos=$1; shift
-	[[ -z "${__aminCounter:-}" ]] && __aminCounter=0 # static variable here
-	local pos=$__aminCounter; __aminCounter=$(( __aminCounter + 1 ))
-	local patt=\
-">   ""->  ""--> ""--->""=-->"" =->""  =>""   >""   <"">  <""-> <""--><""=-><"" =><""  ><""  <<"\
-"> <<""-><<""=><<"" ><<"" <<<""><<<""<<<<""-<<<""--<<""---<""----"" ---""  --""   -""    "
-	REPLY=${patt:$(( 4*(pos%31) )):4}
-}
-pbar_getTimestamp()
-{
-	local dt=$1; shift
-	local hr=$(( dt/60/60 )) min=$(( (dt/60) % 60 )) sec=$(( dt % 60 ))
-	[[ ${#min} == 1 ]] && min=0$min
-	[[ ${#sec} == 1 ]] && sec=0$sec
-	[[ ${#hr}  == 1 ]] && hr=0$hr
-	REPLY="$hr:$min:$sec"
-}
-pbar_getJobsMax()
-{
-	REPLY="   "$symInf # 'printf' does not align unicode characters as expected
-	[[ $__jobsNoMoreTasks != 0 ]] && REPLY=$(( __jobsDone + __jobsRunning )) # estimate
-	[[ $__jobsDoneMax != 0 ]] && REPLY=$__jobsDoneMax # use if known beforehand
-	return 0;
-}
-jobsReportProgress()
-{
-	local dt=$((SECONDS - __jobsStartSec))
-	local status= label= timestamp=
-
-	pbar_getStatus;        status=$REPLY
-	pbar_getTimestamp $dt; timestamp=$REPLY
-	pbar_getAnim      $dt; label=$REPLY
-	pbar_getJobsMax;       tot=$REPLY
-
-	# replace animation by error info
-	if [[ $__jobsErrorCnt != 0 || $__jobsInterruptCnt != 0 ]]; then
-		[[ $__jobsTermReasonInt == 0 ]] && label="#E=$__jobsErrorCnt" || label='INT'
-	fi
-
-	local runWidth=1
-	[[ $__jobsRunning -ge 10 ]] && runWidth=2
-	[[ $__jobsRunning -ge 100 ]] && runWidth=3
-
-	local str
-	if [[ $ENABLE_NAMED_PIPE == 1 ]]; then
-		printf -v str "$timestamp %s[%4s/%4s][#%${runWidth}s]%4s|%s" \
-			"$status" $__jobsDone "$tot" $__jobsRunning "$label" "$__jobsDisplay"
-	else
-		printf -v str "$timestamp %s[%4s/%4s]%s" \
-			"$status" $__jobsDone "$tot" "$__jobsDisplay"
-	fi
-
-	if [[ ${COLUMNS:-0} -gt 4 && ${#str} -gt ${COLUMNS:-0} ]]; then
-		str=${str:0:$(( COLUMNS - 5 ))}...
-	fi
-	local CSI=$'\033[' RESET= CLR_R=
-	[[ -t 1 ]] && { CLR_R=${CSI}0K; RESET=${CSI}m; }
-	printf "${CLR_R}%s${RESET}\r" "$str"
-}
-
 jobsReportTaskFail()
 {
 	local id=$1; shift
@@ -409,6 +339,7 @@ jobsRunTasks()
 	mkdir -p "$tempPath"
 	tempPath="$(cd "$tempPath" >/dev/null; pwd)"
 
+    PB_init
     debug_log_init master
 
 	__jobsRawIdx=0
@@ -417,23 +348,23 @@ jobsRunTasks()
 	__jobsStderrToStdout=${1:-0}
 	__jobsErrorCnt=0
 	__jobsInterruptCnt=0
-	__jobsTermReasonInt=0
 	__jobsNoMoreTasks=0
 	__jobsDone=0
-	__jobsDoneMax=0
 	__jobsStartSec=$SECONDS
-	__jobsDisplay=
 
     # Count jobs number
     local testPlan=$tempPath/tasks.$$.txt
+    local tasksTotal=0
     rm -f $testPlan
 	while read -r; do   # Remove leading and trailing whitespaces
 		local x=$REPLY; x=${x#"${x%%[! $'\t']*}"}; x=${x%"${x##*[! $'\t']}"}; REPLY=$x
 		case $REPLY in '#'*) continue;; esac # comment
 		[[ -z "$REPLY" ]] && continue
-		__jobsDoneMax=$(( __jobsDoneMax + 1 ))
+		tasksTotal=$(( tasksTotal + 1 ))
         echo "$REPLY${userFlags:+ $userFlags}"
 	done <$taskTxt >$testPlan
+
+    PB_set_total $tasksTotal
 
 	#
 	# Single-threaded
@@ -443,21 +374,32 @@ jobsRunTasks()
 			[[ -z "$REPLY" ]] && break
             local id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ))
 			local cmd=$REPLY
-			__jobsDisplay=$id:$cmd
+
+
 			__jobsRunning=1
-			jobsReportProgress
+            PB_set_running 1
+            PB_set_message "$cmd"
+            PB_report_progress
 
 			if ! executeSingleTask $id "$cmd" "$userText"; then
 				__jobsDone=$(( __jobsDone + 1 ))
+                PB_increase_done
+
 				__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
+                PB_increase_errors
+
 				jobsReportTaskFail "$id" 1 "$cmd" >&2
 				break;
 			fi
 			__jobsDone=$(( __jobsDone + 1 ))
+            PB_increase_done
 		done <$testPlan
 		__jobsNoMoreTasks=1
+        PB_set_no_more_input
+
 		__jobsRunning=0
-		jobsReportProgress
+        PB_set_running 0
+		PB_report_progress
 		echo ""
 		return $__jobsErrorCnt
 	fi
@@ -467,8 +409,8 @@ jobsRunTasks()
 	#
 	jobsOnINT() {
 		# most likely stderr is redirected to /dev/null at this moment
-		[[ $__jobsInterruptCnt == 0 && $__jobsErrorCnt == 0 ]] && __jobsTermReasonInt=1
 		__jobsInterruptCnt=$(( __jobsInterruptCnt + 1 ))
+        PB_increase_interrupts
 
 		# unblock everything
         MQ_master_destroy
@@ -503,7 +445,7 @@ jobsRunTasks()
 		# due to previous 'rm' the worker may create file with a pipe name on status report
         MQ_master_destroy
 
-		{ jobsReportProgress; echo ""; }
+		{ PB_report_progress; echo ""; }
 
         local exit_status=0
         [[ $__jobsInterruptCnt != 0 || $__jobsErrorCnt != 0 ]] && exit_status=1
@@ -534,14 +476,15 @@ jobsRunTasks()
 		debug_log_master "jobsStartWorker $id pid=$!"
 
 		__jobsPid="$__jobsPid $!"
-		__jobsDisplay=$id:$cmd
 		__jobsRunning=$(( __jobsRunning + 1 ))
 
-        jobsReportProgress
+        PB_increase_running
+        PB_set_message "$cmd"
+        PB_report_progress
 
         MQ_master_write_task "id=$id:$cmd"
 	done
-	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
+	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1 && PB_set_no_more_input
 
     forgetWorkerPid() {
 		local pid=$1; shift            
@@ -559,6 +502,7 @@ jobsRunTasks()
         forgetWorkerPid $pid
 
 		__jobsRunning=$((__jobsRunning - 1))		# worker exit
+        PB_increase_running -1
 
 		debug_log_master "setWorkerGone pid=$pid [onchain $__jobsPid]"
 	}
@@ -567,7 +511,6 @@ jobsRunTasks()
 	while : ; do
 		# Until have workers running
 		while [[ $__jobsRunning != 0 ]]; do
-			jobsReportProgress
 
             # Single reader, multiple writers
             # https://unix.stackexchange.com/questions/450713/named-pipes-file-descriptors-and-eof/450715#450715
@@ -575,7 +518,7 @@ jobsRunTasks()
             REPLY=
             while [[ -z "$REPLY" ]]; do
                 MQ_master_read_status
-    			case $REPLY in ping:*) jobsReportProgress; REPLY=; esac
+    			case $REPLY in ping:*) PB_report_progress; REPLY=; esac
             done
 
             local msg=$REPLY
@@ -593,17 +536,21 @@ jobsRunTasks()
 				debug_log_master "jobsDone id=$id pid=$pid status=$status"
 
 				__jobsDone=$(( __jobsDone + 1 ))
+                PB_increase_done
+
 				if [[ "$status" != 0 ]]; then
 					setWorkerGone $pid; # worker exit due to task fail
 
 					__jobsErrorCnt=$(( __jobsErrorCnt + 1 ))
+                    PB_increase_errors
+
 					jobsReportTaskFail "$id" $status "$data" >&2
                 else
                     break # must reply on this message
 				fi
 			fi
+            PB_report_progress
 		done
-        jobsReportProgress
 
         debug_log_master "start reply"
 
@@ -613,7 +560,7 @@ jobsRunTasks()
         REPLY=
 	    if [[ $__jobsNoMoreTasks == 0 && $__jobsErrorCnt == 0 && $__jobsInterruptCnt == 0 ]]; then
 			read -r -u 4 || true
-			[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1
+			[[ -z "$REPLY" ]] && __jobsNoMoreTasks=1 && PB_set_no_more_input
     	fi
 		local id= cmd=
 		if [[ -z "$REPLY" ]]; then
@@ -624,9 +571,9 @@ jobsRunTasks()
     		id=$__jobsRawIdx; __jobsRawIdx=$(( __jobsRawIdx + 1 ));
             cmd=$REPLY
 		fi
-		__jobsDisplay=$id:$cmd
 
-		jobsReportProgress
+        PB_set_message "$cmd"
+		PB_report_progress
 
         MQ_master_write_task "id=$id:$cmd"
 	done
