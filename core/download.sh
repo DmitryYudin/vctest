@@ -247,7 +247,7 @@ is_binary_package()
         x265-64bit*) : ;;
         x265-3*) : ;;
         ASHEVCEnc.dll|VMFPlatform.dll|cli_ashevc.exe|ashevc_example.cfg) : ;;
-        vvenc*|vvdec*) : ;;
+        vvenc-assets.7z) : ;;
         *) return 1 ;;
     esac
     return 0
@@ -445,13 +445,21 @@ install_from_cache()
                 $SevenZipExe x -y "$src" -o"$dst" -i"!x265-8b.exe" >/dev/null
                 mv "$dst/x265-8b.exe" "$dst/x265.exe"
             ;;
-            vvenc*)
-                dst="$DIR_BIN/windows/vvenc"
-                $SevenZipExe x -y "$src" -o"$dst" -i"!vvencapp.exe" >/dev/null
-            ;;
-            vvdec*)
-                dst=$DIR_BIN
-                $SevenZipExe x -y "$src" -o"$dst" >/dev/null
+            vvenc-assets.7z)
+                dst='vvenc+vvdec+vvc'
+                case ${OS:-} in
+                    *_NT)   $SevenZipExe e -y "$src" -o"$DIR_BIN"                     -i"!vvdec/windows-clang-x64/vvdecapp.exe" >/dev/null
+                            $SevenZipExe e -y "$src" -o"$DIR_BIN/windows/vvenc"       -i"!vvenc/windows-clang-x64/vvencapp.exe" >/dev/null
+                            $SevenZipExe e -y "$src" -o"$DIR_BIN/windows/vvencff"     -i"!vvenc/windows-clang-x64/vvencFFapp.exe" >/dev/null
+                            $SevenZipExe e -y "$src" -o"$DIR_BIN/windows/vvc"         -i"!vvc/windows-cl-x64/EncoderApp.exe" >/dev/null
+                    ;;
+                    *)      $SevenZipExe e -y "$src" -o"$DIR_BIN"                     -i"!vvdec/linux-clang-x64/vvdecapp" >/dev/null
+                            $SevenZipExe e -y "$src" -o"$DIR_BIN/linux-intel/vvenc"   -i"!vvenc/linux-clang-x64/vvencapp" >/dev/null
+                            $SevenZipExe e -y "$src" -o"$DIR_BIN/linux-intel/vvencff" -i"!vvenc/linux-clang-x64/vvencFFapp" >/dev/null
+                            $SevenZipExe e -y "$src" -o"$DIR_BIN/linux-intel/vvc"     -i"!vvc/linux-clang-x64/EncoderApp" >/dev/null
+                            chmod 777 $DIR_BIN/linux-intel/vvenc/* $DIR_BIN/linux-intel/vvencff/* $DIR_BIN/linux-intel/vvc/*
+                    ;;
+                esac
             ;;
             ASHEVCEnc.dll|VMFPlatform.dll|cli_ashevc.exe|ashevc_example.cfg)
                 dst="$DIR_BIN/windows/ashevc"
