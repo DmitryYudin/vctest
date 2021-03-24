@@ -199,8 +199,7 @@ entrypoint()
             local encFmt
         	dict_getValue "$info" encFmt; encFmt=$REPLY
 
-   			local statLog=TraceDec.txt
-            [[ "$encFmt" == h265 && ! -f "$outputDir/$statLog" ]] && rm -f "$outputDir/decoded.ts"
+            [[ "$encFmt" == h265 && ! -f "$outputDir/decoded_trace_hm" ]] && rm -f "$outputDir/decoded.ts"
         fi
 		[[ -n $decode ]] && rm -f $outputDir/decoded.ts $outputDir/parsed.ts
 		if [[ ! -f "$outputDir/decoded.ts" ]]; then
@@ -637,13 +636,9 @@ encode_single_file()
 	# temporary hack, for backward compatibility (remove later)
 	[[ $codecId == h265demo ]] && encCmdArgs="-c h265demo.cfg $encCmdArgs"
 
-	local cmd="$encCmdArgs $encCmdSrc $encCmdDst"
-	echo "$cmd" > cmd # memorize
-	echo "$encExe" > exe # memorize
-
-	local stdoutLog=stdout.log
-	local cpuLog=cpu.log
-	local fpsLog=fps.log
+	local args="$encCmdArgs $encCmdSrc $encCmdDst"
+	echo "$args" > input_args # memorize
+	echo "$encExe" > input_exe # memorize
 
 	if [[ $transport == local ]]; then
 		# temporary hack, for backward compatibility (remove later)
@@ -658,22 +653,20 @@ encode_single_file()
 		if $estimate_execution_time; then
 			# Start CPU monitor
 			trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
-			start_cpu_monitor "$encExe" > $cpuLog
+			start_cpu_monitor "$encExe" > encoded_cpu
 		fi
 
 		# Encode
 		local consumedSec=$(date +%s)
-		if ! { echo "yes" | $encExe $cmd; } 1>$stdoutLog 2>&1 || [ ! -f "$dst" ]; then
+		if ! { echo "yes" | $encExe $args; } 1>encoded_log 2>&1 || [ ! -f "$dst" ]; then
 			echo "" # newline if stderr==tty
-			cat "$stdoutLog" >&2
+			cat encoded_log >&2
 			error_exit "encoding error, see logs above"
 		fi
 		consumedSec=$(( $(date +%s) - consumedSec ))
 
 		if $estimate_execution_time; then
-			local fps=0
-			[[ $consumedSec != 0 ]] && fps=$(( 1000*srcNumFr/consumedSec ))
-			echo "$fps" > $fpsLog
+			echo $consumedSec > encoded_sec
 
 			# Stop CPU monitor
 			stop_cpu_monitor
@@ -692,7 +685,7 @@ encode_single_file()
 
 			start_cpu_monitor() {
 				local worker_pid=\$1; shift
-				{ while ps -o '%cpu=,cpu=' -p \$worker_pid >> $cpuLog; do sleep .5s; done; } &
+				{ while ps -o '%cpu=,cpu=' -p \$worker_pid >> encoded_cpu; do sleep .5s; done; } &
 				PERF_ID=\$!
 			}
 			stop_cpu_monitor() {
@@ -703,10 +696,10 @@ encode_single_file()
 
 			consumedSec=\$(date +%s)
             if [[ $ENABLE_CPU_MONITOR == 1 ]]; then # run decoder in background
-			    $encExe $cmd </dev/null 1>$stdoutLog 2>&1 &
+			    $encExe $args </dev/null 1>encoded_log 2>&1 &
                 pid=\$!
             else
-			    $encExe $cmd </dev/null 1>$stdoutLog 2>&1
+			    $encExe $args </dev/null 1>encoded_log 2>&1
             fi
 			error_code=0
             if [[ $ENABLE_CPU_MONITOR == 1 ]]; then
@@ -720,12 +713,11 @@ encode_single_file()
 
 			if [ \$error_code != 0 -o ! -f $dst ]; then
 				echo "" # newline if stderr==tty
-				cat $stdoutLog >&2
+				cat encoded_log >&2
 				exit 1
 			fi
 
-			[[ \$consumedSec != 0 ]] && fps=\$(( $srcNumFr/consumedSec )) || fps=0
-			echo "\$fps" > $fpsLog
+			echo \$consumedSec > encoded_sec
 		"
 		TARGET_pull $remoteOutputDir/. .
 		TARGET_exec "rm -rf $remoteOutputDir"
@@ -749,20 +741,13 @@ decode_single_file()
 	dict_getValue "$info" src; src=$REPLY
 	dict_getValue "$info" dst; dst=$REPLY
 
-	local encFmt= srcRes= srcFps= srcNumFr=
+	local encFmt= srcRes=
 	dict_getValue "$info" encFmt; encFmt=$REPLY
 	dict_getValue "$info" srcRes; srcRes=$REPLY
-	dict_getValue "$info" srcFps; srcFps=$REPLY
-	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
 	local recon=$(basename $dst).yuv
-	local kbpsLog=kbps.log
-	local summaryLog=summary.log
 
-	local sizeInBytes= kbps=
-	sizeInBytes=$(stat -c %s $dst)
-	kbps=$(awk "BEGIN { print 8 * $sizeInBytes / ($srcNumFr/$srcFps) / 1000 }")
-	echo "$kbps" > $kbpsLog
+	stat -c %s $dst > decoded_bitstream_size
 
 	local decoderId=
 	case $encFmt in
@@ -771,47 +756,27 @@ decode_single_file()
 		*) error_exit "can't find decoder for '$encFmt' format";;
 	esac
 
-	local frameLog=frame.log
 	if [[ $decoderId == ffmpeg ]]; then
 		ffmpeg -y -loglevel error -i $dst $recon
 
-		local ffprobeLog=ffprobe.log
-		ffprobe -v error -show_frames -i $dst | tr -d $'\r' > $ffprobeLog		
-		{ # dump one liners for each frame from ffprobe output
-			local type= size= cnt=0
-			while read -r; do
-				case $REPLY in
-					'[FRAME]')  type=; size=; cnt=$(( cnt + 1 ));;
-					'[/FRAME]') echo "n:$cnt type:$type size:$size";;
-					pict_type=I) type=I;;
-					pict_type=P) type=P;;
-					pkt_size=*) size=${REPLY#pkt_size=};;
-				esac
-			done < $ffprobeLog
-		} > $frameLog
+		ffprobe -v error -show_frames -i $dst | tr -d $'\r' > decoded_ffprobe
+
 	elif [[ $decoderId == vvdec ]]; then
-    	local vvdecLog=vvdec.log
-        vvdecapp -b $dst -o $recon > $vvdecLog
+        vvdecapp -b $dst -o $recon > decoded_vvdec
     fi
 
-	local ssimLog=ssim.log
-	local psnrLog=psnr.log
 	# ffmpeg does not accept filename in C:/... format as a filter option
     local log
-	if ! log=$(ffmpeg -hide_banner -s $srcRes -i $DIR_VEC/$src -s $srcRes -i $recon -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
+	if ! log=$(ffmpeg -hide_banner -s $srcRes -i $DIR_VEC/$src -s $srcRes -i $recon -lavfi "ssim=decoded_ssim;[0:v][1:v]psnr=decoded_psnr" -f null - ); then
 		echo "$log" && return 1
 	fi
-
-	# merge one-liners
-	local logsToMerge="$psnrLog $ssimLog"
-	[[ -f $frameLog ]] && logsToMerge="$frameLog $logsToMerge"
-	paste $logsToMerge | tr -d $'\r' > $summaryLog
 
 	case $encFmt in
 		h265)
             if [[ "$TRACE_HM" == 1 ]]; then
-    			local statLog=TraceDec.txt
+    			# hard-coded log filename: 'TraceDec.txt'
 	    		TAppDecoder -b $dst > /dev/null
+                mv TraceDec.txt decoded_trace_hm
             fi
 		;;
 	esac
@@ -829,31 +794,55 @@ parse_single_file()
 	local outputDir="$DIR_OUT/$outputDirRel"
 	pushd "$outputDir"
 
-	local info= codecId= srcNumFr=
+	local info= codecId= srcNumFr= srcFps=
     { read -r info; } < "info.kw"
 
 	dict_getValue "$info" codecId; codecId=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
+	dict_getValue "$info" srcFps; srcFps=$REPLY
 
-	local stdoutLog=stdout.log
-	local kbpsLog=kbps.log
-	local cpuLog=cpu.log
-	local fpsLog=fps.log
-	local summaryLog=summary.log
-	local statLog=TraceDec.txt
+    local bitstream_size
+    { read -r bitstream_size; } < decoded_bitstream_size
 
-	local cpuAvg=- extFPS=- intFPS= kbps=- framestat= blockstat=
-	if [[ -f "$cpuLog" ]]; then # may not exist
-		cpuAvg=$(parse_cpuLog "$cpuLog")
+    local kbps
+	kbps=$(awk "BEGIN { print 8 * $bitstream_size / ($srcNumFr/$srcFps) / 1000 }")
+
+	local cpuAvg=- extFPS=- intFPS=
+	if [[ -f encoded_cpu ]]; then # may not exist
+		cpuAvg=$(parse_cpuLog encoded_cpu)
 		printf -v cpuAvg "%.0f" "$cpuAvg"
 	fi
-	if [[ -f "$fpsLog" ]]; then # may not exist
-        { read -r extFPS; } < "$fpsLog"
+	if [[ -f encoded_sec ]]; then # may not exist
+        local consumedSec
+        { read -r consumedSec; } < encoded_sec
+        [[ $consumedSec -gt 0 ]] && extFPS=$(( srcNumFr / consumedSec ))
 	fi
-	intFPS=$(parse_stdoutLog $codecId $stdoutLog $srcNumFr)
-    { read -r kbps; } < "$kbpsLog"
-	[[ -f "$summaryLog" ]] && framestat=$(parse_framestat "$summaryLog")
-	[[ -f "$statLog" ]] && blockstat=$(python "$parsePy" "$statLog")
+	intFPS=$(parse_stdoutLog $codecId encoded_log $srcNumFr)
+
+	# merge one-liners
+	local logsToMerge="decoded_psnr decoded_ssim"
+    if [[ -f decoded_ffprobe ]]; then
+		{ # dump one liners for each frame from ffprobe output
+			local type= size= cnt=0
+			while read -r; do
+				case $REPLY in
+					'[FRAME]')  type=; size=; cnt=$(( cnt + 1 ));;
+					'[/FRAME]') echo "n:$cnt type:$type size:$size";;
+					pict_type=I) type=I;;
+					pict_type=P) type=P;;
+					pkt_size=*) size=${REPLY#pkt_size=};;
+				esac
+			done < decoded_ffprobe
+		} > parsed_frame
+        logsToMerge="parsed_frame $logsToMerge"
+    fi
+	paste $logsToMerge | tr -d $'\r' > parsed_summary
+
+    local framestat=
+    framestat=$(parse_framestat parsed_summary)
+
+    local blockstat=
+	[[ -f decoded_trace_hm ]] && blockstat=$(python "$parsePy" decoded_trace_hm)
 
 	local dict="extFPS:$extFPS intFPS:$intFPS cpu:$cpuAvg kbps:$kbps $framestat $blockstat"
 	echo "$dict" > report.kw
