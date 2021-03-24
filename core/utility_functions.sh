@@ -9,6 +9,13 @@ error_exit()
 	exit 1
 }
 
+update_PATH()
+{
+    case ${OS:-} in
+        *_NT) PATH=$(cygpath -p $1):$PATH;;
+        *) PATH=$(ospath $1):$PATH;;
+    esac
+}
 # Normalized path name with '/' separator
 # Always starts with driver letter on Windows: 'C:/...'
 # Note, WSL buildins do not accept Windows path name in a form of 'C:/abcd'.

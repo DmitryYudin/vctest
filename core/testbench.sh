@@ -27,13 +27,10 @@ DIR_VEC=$(ospath "$dirScript"/../vectors)
 NCPU=0
 TRACE_HM=0
 ENABLE_CPU_MONITOR=0
-readonly ffmpegExe=$dirScript/../'bin/ffmpeg.exe'
-readonly ffprobeExe=$dirScript/../'bin/ffprobe.exe'
+
 timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 readonly dirTmp=$(tempdir)/vctest/$timestamp
-readonly statExe=$dirScript/../'bin/TAppDecoder.exe'
 readonly parsePy=$dirScript/../'core/parseTrace.py'
-readonly vvdecExe=$dirScript/../bin/vvdecapp
 
 usage()
 {
@@ -82,6 +79,10 @@ usage()
 
 entrypoint()
 {
+    # always access decoders thought PATH (i.e. system wide or residing in ../bin folder)
+    update_PATH $dirScript/../bin
+    export PATH
+
     local target transport=local
     case ${OS:-} in
         *_NT) target=${target:-windows};;
@@ -772,10 +773,10 @@ decode_single_file()
 
 	local frameLog=frame.log
 	if [[ $decoderId == ffmpeg ]]; then
-		$ffmpegExe -y -loglevel error -i $dst $recon
+		ffmpeg -y -loglevel error -i $dst $recon
 
 		local ffprobeLog=ffprobe.log
-		$ffprobeExe -v error -show_frames -i $dst | tr -d $'\r' > $ffprobeLog		
+		ffprobe -v error -show_frames -i $dst | tr -d $'\r' > $ffprobeLog		
 		{ # dump one liners for each frame from ffprobe output
 			local type= size= cnt=0
 			while read -r; do
@@ -790,14 +791,14 @@ decode_single_file()
 		} > $frameLog
 	elif [[ $decoderId == vvdec ]]; then
     	local vvdecLog=vvdec.log
-        $vvdecExe -b $dst -o $recon > $vvdecLog
+        vvdecapp -b $dst -o $recon > $vvdecLog
     fi
 
 	local ssimLog=ssim.log
 	local psnrLog=psnr.log
 	# ffmpeg does not accept filename in C:/... format as a filter option
     local log
-	if ! log=$($ffmpegExe -hide_banner -s $srcRes -i $DIR_VEC/$src -s $srcRes -i $recon -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
+	if ! log=$(ffmpeg -hide_banner -s $srcRes -i $DIR_VEC/$src -s $srcRes -i $recon -lavfi "ssim=$ssimLog;[0:v][1:v]psnr=$psnrLog" -f null - ); then
 		echo "$log" && return 1
 	fi
 
@@ -810,7 +811,7 @@ decode_single_file()
 		h265)
             if [[ "$TRACE_HM" == 1 ]]; then
     			local statLog=TraceDec.txt
-	    		$statExe -b $dst > /dev/null
+	    		TAppDecoder -b $dst > /dev/null
             fi
 		;;
 	esac
