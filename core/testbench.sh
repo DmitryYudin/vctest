@@ -207,6 +207,24 @@ entrypoint()
 	local self
 	relative_path "$0"; self=$REPLY # just to make output look nicely
 
+    # sort descending by input size to execute long test first
+    if [[ $transport == condor ]]; then
+        local files=
+        for outputDirRel in $encdecList; do
+            local info
+            { read -r info; } < $DIR_OUT/$outputDirRel/info.kw
+            dict_getValue "$info" src; src=$REPLY
+            files="$files $src"
+        done
+    	local sizesFile=$(mktemp)
+        { cd $DIR_VEC >/dev/null && stat -L -c %s $files && cd - >/dev/null; } > $sizesFile
+
+        encdecList=$(for outputDirRel in $encdecList; do read -r; echo "$REPLY $outputDirRel"; done <$sizesFile | 
+                sort -k1 -n -r | 
+                awk '{ $1=""; printf "%s ", $0 }'; )
+        rm $sizesFile
+    fi
+
 	local testplan=$dirTmp/testplan.txt
 
     local do_encdec=
