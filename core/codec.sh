@@ -191,7 +191,9 @@ codec_verify()
 {
 	local transport=$1; shift
 	local target=$1; shift
-	local CODECS="$*" codecId= cmd= codecEnabled= encExe= codecRemoved=
+	local CODECS=$1; shift
+
+	local codecId= cmd= codecEnabled= encExe= codecRemoved=
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
