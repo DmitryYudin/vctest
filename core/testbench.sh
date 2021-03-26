@@ -172,43 +172,47 @@ entrypoint()
 
 	local encodeList= decodeList= parseList= reportList=
 	while read info; do
-		local encExeHash encCmdHash
+		local encExeHash encCmdHash encFmt
 		dict_getValue "$info" encExeHash; encExeHash=$REPLY
 		dict_getValue "$info" encCmdHash; encCmdHash=$REPLY
+        dict_getValue "$info" encFmt; encFmt=$REPLY
 		local outputDirRel="$encExeHash/$encCmdHash"
 		local outputDir="$DIR_OUT/$outputDirRel"
 
-		local encode=false
-		if [[ -n "$force" || ! -f "$outputDir/encoded.ts" ]]; then
-			encode=true
-		elif [[ $NCPU -eq 1 && ! -f "$outputDir/cpu.log" ]]; then
+		local do_encode= do_decode= do_parse=
+
+        [[ -n $force ]] && do_encode=1
+        [[ -z $do_encode && ! -f $outputDir/encoded.ts ]] && do_encode=1
+        if [[ -z $do_encode && $NCPU -eq 1 && ! -f $outputDir/encoded_cpu ]]; then
 			# cpu load monitoring is currently disabled for a remote run
-			[[ $target == windows && $transport == local ]] && encode=true  # update CPU log
-		fi
-		if $encode; then
+            [[ $target == windows && $transport == local ]] && do_encode=1 # update CPU log
+        fi
+
+        [[ -n $do_encode ]] && do_decode=1
+		[[ -n $decode ]] && do_decode=1
+        [[ -z $do_decode && ! -f $outputDir/decoded.ts ]] && do_decode=1
+        if [[ -z $do_decode && "$TRACE_HM" == 1 ]]; then
+            [[ $encFmt == h265 && ! -f $outputDir/decoded_trace_hm ]] && do_decode=1
+        fi
+
+        [[ -n $do_decode ]] && do_parse=1
+        [[ -n $parse ]] && do_parse=1
+        [[ -z $do_parse && ! -f $outputDir/parsed.ts ]] && do_parse=1
+		if [[ -n $do_encode ]]; then
 			# clean up target directory if we need to start from a scratch
 			rm -rf "$outputDir"		# this alos force decoding and parsing
 			mkdir -p "$outputDir"
-
 			# readonly kw-file will be used across all processing stages
 			echo "$info" > $outputDir/info.kw
+        elif [[ -n $do_decode ]]; then
+            rm -f $outputDir/parsed_* $outputDir/parsed.ts $outputDir/decoded_* $outputDir/decoded.ts
+        elif [[ -n $do_parse ]]; then
+            rm -f $outputDir/parsed_* $outputDir/parsed.ts
+		fi
 
-			encodeList="$encodeList $outputDirRel"
-		fi
-        if [[ "$TRACE_HM" == 1 ]]; then
-            local encFmt
-        	dict_getValue "$info" encFmt; encFmt=$REPLY
-
-            [[ "$encFmt" == h265 && ! -f "$outputDir/decoded_trace_hm" ]] && rm -f "$outputDir/decoded.ts"
-        fi
-		[[ -n $decode ]] && rm -f $outputDir/decoded.ts $outputDir/parsed.ts
-		if [[ ! -f "$outputDir/decoded.ts" ]]; then
-			decodeList="$decodeList $outputDirRel"
-		fi
-        [[ -n $parse ]] && rm -f $outputDir/parsed.ts
-		if [[ ! -f "$outputDir/parsed.ts" ]]; then
-			parseList="$parseList $outputDirRel"
-		fi
+        [[ -n $do_encode ]] && encodeList="$encodeList $outputDirRel"
+        [[ -n $do_decode ]] && decodeList="$decodeList $outputDirRel"
+        [[ -n $do_parse ]]  && parseList="$parseList $outputDirRel"
 		reportList="$reportList $outputDirRel"
 
 		progress_next "$outputDirRel"
