@@ -10,13 +10,13 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 . "$dirScript/codec.sh"
 . "$dirScript/remote_target.sh"
 
-PRMS="28 34 39 44"
+PRMS=-
 REPORT=report.log
 REPORT_KW=
 CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo "\
 "h264aspt vp8 vp9 vvenc vvenc2 vvencff"
 PRESETS=
-THREADS=1
+THREADS=
 VECTORS="
 	akiyo_352x288_30fps.yuv
 	foreman_352x288_30fps.yuv
@@ -130,7 +130,7 @@ entrypoint()
 
 	PRESETS=${PRESETS:--}
 	# for multithreaded run, run in single process to get valid cpu usage estimation
-	[[ $THREADS -gt 1 ]] && NCPU=1
+	[[ -n $THREADS && $THREADS -gt 1 ]] && NCPU=1
 
     local numCodecs numPresets
     list_size "$CODECS"; numCodecs=$REPLY
@@ -168,7 +168,7 @@ entrypoint()
 	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS" "$PRESETS"
 
 	local optionsFile="$dirTmp"/options.txt
-	prepare_optionsFile $target "$optionsFile"
+	prepare_optionsFile $target "$optionsFile" "$CODECS"
 
 	local encodeList= decodeList= parseList= reportList=
 	while read info; do
@@ -343,25 +343,35 @@ prepare_optionsFile()
 {
 	local target=$1; shift
 	local optionsFile=$1; shift
+    local CODECS="$@"
 
-	local prm= src= codecId= preset= infoTmpFile=$(mktemp)
-	for prm in $PRMS; do
-	for src in $VECTORS; do
-	for codecId in $CODECS; do
-	for preset in $PRESETS; do
+    prepare_options() {
+        local codecId=$1; shift
+        local prm=$1; shift
+        local src=$1; shift
+        local preset=$1; shift
+
+    	if [[ $prm == '-' ]]; then
+            error_exit "rate parameter '--prms' not set"
+        fi
 		local qp=- bitrate=-
-		if [[ $prm -lt 60 ]]; then
-			qp=$prm
-		else
-			bitrate=$prm
-		fi
-		[[ $preset == '-' ]] && { codec_default_preset "$codecId"; preset=$REPLY; }
+		[[ $prm -lt 60 ]] && qp=$prm || bitrate=$prm
+
+    	if [[ $preset == '-' ]]; then
+            codec_default_preset $codecId; preset=$REPLY
+        fi
+
+        local threads=$THREADS
+        if [[ -z $threads ]]; then
+            threads=1
+        fi
+
 		local srcRes= srcFps= srcNumFr=
 		detect_resolution_string "$DIR_VEC/$src"; srcRes=$REPLY
 		detect_framerate_string "$DIR_VEC/$src"; srcFps=$REPLY
 		detect_frame_num "$DIR_VEC/$src" "$srcRes"; srcNumFr=$REPLY
 
-		local args="--res $srcRes --fps $srcFps --threads $THREADS"
+		local args="--res $srcRes --fps $srcFps --threads $threads"
 		[[ '-' == $bitrate ]] || args="$args --bitrate $bitrate"
 		[[ '-' == $qp      ]] || args="$args --qp $qp"
 		[[ '-' == $preset  ]] || args="$args --preset $preset"
@@ -376,8 +386,18 @@ prepare_optionsFile()
 		local dst="$SRC.$encFmt"
 
 		local info="src:$src codecId:$codecId srcRes:$srcRes srcFps:$srcFps srcNumFr:$srcNumFr"
-		info="$info QP:$qp BR:$bitrate PRESET:$preset TH:$THREADS SRC:$SRC dst:$dst"
+		info="$info QP:$qp BR:$bitrate PRESET:$preset TH:$threads SRC:$SRC dst:$dst"
 		info="$info encExe:$encExe encFmt:$encFmt encExeHash:$encExeHash encCmdArgs:$encCmdArgs"
+        REPLY=$info
+    }
+
+	local prm= src= codecId= preset= infoTmpFile=$(mktemp)
+	for prm in $PRMS; do
+	for src in $VECTORS; do
+	for codecId in $CODECS; do
+	for preset in $PRESETS; do
+        local info
+        prepare_options $codecId $prm $src $preset >&2; info=$REPLY
 		printf '%s\n' "$info"
 	done
 	done
