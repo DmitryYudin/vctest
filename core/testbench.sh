@@ -12,7 +12,6 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 
 PRMS=-
 REPORT=report.log
-REPORT_KW=
 CODECS=
 PRESET=
 THREADS=
@@ -84,15 +83,14 @@ entrypoint()
     esac
 
     local timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-	local cmd_report= endofflags=
+	local endofflags=
 	local hide_banner= force= parse= decode=
-	local targetInfo=
 	while [[ "$#" -gt 0 ]]; do
 		local nargs=2
 		case $1 in
 			-h|--help)		usage && return;;
 			-i|--in*) 		VECTORS="$VECTORS $2";;
-			-o|--out*) 		cmd_report=$2;;
+			-o|--out*) 		REPORT=${2//\\//};;
 			-c|--codec*) 	CODECS=$2;;
 			-t|--threads)   THREADS=$2;;
 			-p|--prms) 		PRMS=$2;;
@@ -114,16 +112,11 @@ entrypoint()
 	done
     local dirTmp=$(tempdir)/vctest/$timestamp
 
-	[[ -n "$cmd_report" ]] && REPORT=${cmd_report//\\//}
-
     VECTORS=${VECTORS# }
-
-    # Currently only used by bd-rate script
-    REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
-
 	# for multithreaded run, run in single process to get valid cpu usage estimation
 	[[ -n $THREADS && $THREADS -gt 1 ]] && NCPU=1
 
+	local targetInfo=
 	if [[ $transport == adb || $transport == ssh ]] ; then
 		TARGET_setTarget $target "$dirScript"/../remote.local
 		TARGET_getFingerprint; targetInfo=$REPLY
@@ -134,7 +127,7 @@ entrypoint()
 		return $?
 	fi
 
-	mkdir -p "$DIR_OUT" "$(dirname $REPORT)"
+	mkdir -p "$DIR_OUT" $(dirname $REPORT)
 
 	# Remove non-existing and set abs-path
 	vectors_verify $transport $VECTORS; VECTORS=$REPLY
@@ -270,9 +263,13 @@ entrypoint()
 	#
 	# Reporting
 	#
+	progress_begin "[5/5] Reporting..."	"$reportList"
+
+    # Currently only used by bd-rate script
+    local REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
+
 	local info="$target [$transport]"
 	[[ -n "$targetInfo" ]] && info="$info [$targetInfo]"
-	progress_begin "[5/5] Reporting..."	"$reportList"
 	if [[ -z "$hide_banner" ]]; then
 		echo "$timestamp $info" >> $REPORT
 		echo "$timestamp $info" >> $REPORT_KW
@@ -281,8 +278,8 @@ entrypoint()
 		output_header
 	fi
 	for outputDirRel in $reportList; do
-		progress_next "$outputDirRel"
-		report_single_file "$outputDirRel"
+		progress_next $outputDirRel
+		report_single_file $REPORT $REPORT_KW $outputDirRel
 	done
 	progress_end
 
@@ -550,9 +547,11 @@ output_legend()
 }
 output_report()
 {
-	local dict="$*"
+    local report=$1; shift
+    local report_kw=$1; shift
+	local dict=$1
 
-	echo "$dict" >> $REPORT_KW
+	echo "$dict" >> $report_kw
 
 	local extFPS= intFPS= cpu= kbps= numI= avgI= avgP= peak= gPSNR= psnrI= psnrP= gSSIM=
 	local codecId= srcRes= srcFps= numFr= QP= BR= PRESET= TH= SRC= HASH= ENC=
@@ -594,19 +593,21 @@ output_report()
 	printf 	-v str "%s %5s %5s %5s"             "$str" "$numIntra" "$numInter" "$numSkip"
 	printf 	-v str "%s %s"                      "$str" "$SRC"
 
-	echo "$str" >> $REPORT
+	echo "$str" >> $report
 }
 
 report_single_file()
 {
+    local report=$1; shift
+    local report_kw=$1; shift
 	local outputDirRel=$1; shift
 	local outputDir="$DIR_OUT/$outputDirRel"
 
-	local info= report=
+	local info= dict=
     { read -r info; } < "$outputDir/info.kw"
-    { read -r report; } < "$outputDir/report.kw"
+    { read -r dict; } < "$outputDir/report.kw"
 
-	output_report "$info $report"
+	output_report $report $report_kw "$info $dict"
 }
 
 encode_single_file()
