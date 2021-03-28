@@ -13,8 +13,7 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 PRMS=-
 REPORT=report.log
 REPORT_KW=
-CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h264demo "\
-"h264aspt vp8 vp9 vvenc vvenc2 vvencff"
+CODECS=
 PRESETS=
 THREADS=
 VECTORS=
@@ -25,8 +24,6 @@ NCPU=0
 TRACE_HM=0
 ENABLE_CPU_MONITOR=0
 
-timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-readonly dirTmp=$(tempdir)/vctest/$timestamp
 readonly parsePy=$dirScript/../'core/parseTrace.py'
 
 usage()
@@ -40,7 +37,7 @@ usage()
 	    -i|--input   <x> Input YUV files relative to '/vectors' directory. Multiple '-i vec' allowed.
 	                     '/vectors' <=> '$(ospath "$dirScript/../vectors")'
 	    -o|--output  <x> Report path. Default: "$REPORT".
-	    -c|--codec   <x> Codecs list. Default: "$CODECS".
+	    -c|--codec   <x> Codecs list.
 	    -t|--threads <x> Number of threads to use
 	    -p|--prms    <x> Bitrate (kbps) or QP list. Default: "$PRMS".
 	                     Values less than 60 considered as QP.
@@ -86,7 +83,8 @@ entrypoint()
         *) target=${target:-linux};;
     esac
 
-	local cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_ncpu= cmd_endofflags=
+    local timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
+	local cmd_report= cmd_threads= cmd_prms= cmd_presets= endofflags=
 	local hide_banner= force= parse= decode=
 	local targetInfo=
 	while [[ "$#" -gt 0 ]]; do
@@ -95,11 +93,11 @@ entrypoint()
 			-h|--help)		usage && return;;
 			-i|--in*) 		VECTORS="$VECTORS $2";;
 			-o|--out*) 		cmd_report=$2;;
-			-c|--codec*) 	cmd_codecs=$2;;
+			-c|--codec*) 	CODECS=$2;;
 			-t|--threads)   cmd_threads=$2;;
 			-p|--prms) 		cmd_prms=$2;;
 			   --preset) 	cmd_presets=$2;;
-			-j|--ncpu)		cmd_ncpu=$2;;
+			-j|--ncpu)		NCPU=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; transport=adb; nargs=1;;
 			   --ssh)       target=ssh; transport=ssh; nargs=1;;
@@ -108,18 +106,18 @@ entrypoint()
                --parse)     parse=1; nargs=1;;
                --trace_hm)  TRACE_HM=1; nargs=1;;
                --mon)       ENABLE_CPU_MONITOR=1; nargs=1;;
-			   --)			cmd_endofflags=1; nargs=1;;
+			   --)			endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
 		shift $nargs
-		[[ -n "$cmd_endofflags" ]] && break
+		[[ -n "$endofflags" ]] && break
 	done
+    local dirTmp=$(tempdir)/vctest/$timestamp
+
 	[[ -n "$cmd_report" ]] && REPORT=${cmd_report//\\//}
-	[[ -n "$cmd_codecs" ]] && CODECS=$cmd_codecs
 	[[ -n "$cmd_threads" ]] && THREADS=$cmd_threads
 	[[ -n "$cmd_prms" ]] && PRMS=$cmd_prms
 	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
-	[[ -n "$cmd_ncpu" ]] && NCPU=$cmd_ncpu
 
     VECTORS=${VECTORS# }
 
@@ -141,7 +139,7 @@ entrypoint()
 		TARGET_setTarget $target "$dirScript"/../remote.local
 		TARGET_getFingerprint; targetInfo=$REPLY
 	fi
-	if [[ -n "$cmd_endofflags" ]]; then
+	if [[ -n "$endofflags" ]]; then
 		echo "exe: $@"
 		"$@"
 		return $?
