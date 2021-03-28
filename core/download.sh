@@ -26,9 +26,21 @@ DIR_VEC=$(ospath "$dirScript/../vectors")
 INPUT=
 ADDR=
 readonly DIR_CACHE=$DIR_VEC/cache
-readonly SevenZipExe=$DIR_BIN/7z
-readonly ffmpegExe=$DIR_BIN/ffmpeg
-readonly ffprobeExe=$DIR_BIN/ffprobe
+case ${OS:-} in 
+    *_NT) 
+        readonly SevenZipExe=$DIR_BIN/7z
+        readonly ffmpegExe=$DIR_BIN/ffmpeg
+        readonly ffprobeExe=$DIR_BIN/ffprobe
+    ;;
+    *)
+        readonly SevenZipExe=7z        # apt install p7zip-full
+        readonly ffmpegExe=ffmpeg      # apt install ffmpeg
+        readonly ffprobeExe=ffprobe
+        command -p -v $SevenZipExe &>/dev/null || error_exit "7z not found -> 'apt install p7zip-full'"
+        command -p -v $ffmpegExe &>/dev/null || error_exit "ffmpeg not found -> 'apt install ffmpeg'"
+        command -p -v $ffprobeExe &>/dev/null || error_exit "ffprobe not found -> 'apt install ffmpeg'"
+    ;;
+esac
 
 readonly DB_STATUS=0
 readonly DB_LEN=1
@@ -225,14 +237,12 @@ request_url_info()
 
 is_binary_package()
 {
-    local url=$1; shift
-    local name=${url##*/}
+    local name=$1; shift
     case $name in
         ffmpeg-*) : ;;
         MediaSamples_MSDK_*) : ;;
-        AppEncoder_x64.exe) : ;;
         HM-Win64-Release.zip) : ;;
-        appencoder) : ;;
+        ks265codec-master.zip) : ;;
         Win64-Release.zip) : ;;
         x265-64bit*) : ;;
         x265-3*) : ;;
@@ -285,7 +295,7 @@ download_in_cache()
         return
     fi
 
-    if ! is_binary_package "$url"; then
+    if ! is_binary_package "$name"; then
         if [[ -n ${MAX_FILE_SIZE_MB:-} ]]; then
             if [[ $len -gt $(( MAX_FILE_SIZE_MB * 1000000 )) ]]; then
                 print_console "%8s %-40s %s\n" "$len_hr" "${url##*/}"\
@@ -327,7 +337,7 @@ download_in_cache()
 install_from_cache()
 {
     update_known_dst() {
-        # there is no assoaciated arrays in bash, so we use two list instead
+        # there is no associated arrays in bash, so we use two lists instead
         local url=$1; shift
         local dst=$1; shift
         local known_dst idx=
@@ -392,14 +402,15 @@ install_from_cache()
             fi
             REPLY=$str
         }
-        local url=$1 dst=$2
+        local url=$1 dst=$2 name
         DB_set_item $url $DB_STATUS $STATUS_LANDED
+        DB_get_item $url $DB_NAME; name=$REPLY
         trim_from_left "$dst" 50; dst=$REPLY
-        print_console "%8s %-40s -> %s\n" "ok" "${url##*/}" "$dst"
+        print_console "%8s %-40s -> %s\n" "ok" "$name" "$dst"
     }
 
     # Binaries here
-    if is_binary_package "$url"; then
+    if is_binary_package "$name"; then
         case $name in
             ffmpeg-*)
                 dst=$DIR_BIN
@@ -410,17 +421,16 @@ install_from_cache()
                 $SevenZipExe x -y "$src" -o"$dst" -i"!*File_sample_encode.exe0" >/dev/null
                 mv "$dst/File_sample_encode.exe0" "$dst/sample_encode.exe"
             ;;
-            AppEncoder_x64.exe)
-                dst="$DIR_BIN/windows/kingsoft"
-                make_link "$dst" "$src"
-            ;;
             HM-Win64-Release.zip)
                 dst="$DIR_BIN"
                 $SevenZipExe x -y "$src" -o"$dst" >/dev/null
             ;;
-            appencoder)
-                dst="$DIR_BIN/android/kingsoft"
-                make_link "$dst" "$src"
+            ks265codec-master.zip)
+                dst="$DIR_BIN/.../kingsoft"
+                $SevenZipExe e -y "$src" -o"$DIR_BIN/android/kingsoft" -i!"ks265codec-master/android_arm64/*" >/dev/null
+                $SevenZipExe e -y "$src" -o"$DIR_BIN/linux-intel/kingsoft" -i!"ks265codec-master/ubuntu_x64/*" >/dev/null
+                $SevenZipExe e -y "$src" -o"$DIR_BIN/windows/kingsoft" -i!"ks265codec-master/win/*" >/dev/null
+                chmod +777 "$DIR_BIN/android/kingsoft/"* "$DIR_BIN/linux-intel/kingsoft/"*
             ;;
             Win64-Release.zip)
                 dst="$DIR_BIN/windows/kvazaar"
