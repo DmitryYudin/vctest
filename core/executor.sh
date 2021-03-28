@@ -18,6 +18,19 @@ executor()
 
     export PATH=$(pwd):$PATH
 
+    local removeOriginalYUV=
+    if [[ $task == encdec ]]; then
+        # condor + no shared files
+        if [[ $(basename $originalYUV) == $originalYUV ]]; then
+            local originalNut=${originalYUV%.*}.nut
+            if [[ ! -f $originalYUV && -f $originalNut ]]; then
+                ffmpeg -i $originalNut $originalYUV >/dev/null
+                trap "rm -f $originalYUV" EXIT
+                removeOriginalYUV=1
+            fi
+        fi
+    fi
+
     if [[ $task == encdec || $task == encode ]]; then
         local do_encode=1
         [[ $task == encdec ]] && [[ -f encoded.ts ]] && do_encode=
@@ -28,6 +41,11 @@ executor()
     if [[ $task == encdec || $task == decode ]]; then
         executor_decode
     	date "+%Y.%m.%d-%H.%M.%S" > decoded.ts
+    fi
+
+    if [[ $removeOriginalYUV == 1 ]]; then
+        trap - EXIT
+        rm -f $originalYUV
     fi
 }
 

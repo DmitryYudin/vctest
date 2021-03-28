@@ -220,6 +220,7 @@ entrypoint()
             local info
             { read -r info; } < $DIR_OUT/$outputDirRel/info.kw
             dict_getValue "$info" src; src=$REPLY
+            [[ -f ${src%.*}.nut ]] && src=${src%.*}.nut
             files="$files $src"
         done
     	local sizesFile=$(mktemp)
@@ -708,6 +709,8 @@ encdec_single_file()
     	if [[ -z ${CONDOR_VECTORS:-} ]]; then
             remoteSrc=$(basename $src)
             src=$DIR_VEC/$src
+            # replace transfer with 'nut'
+            [[ -f ${src%.*}.nut ]] && src=${src%.*}.nut
         else
             remoteSrc=$CONDOR_VECTORS/$src
             src= # do not transfer
