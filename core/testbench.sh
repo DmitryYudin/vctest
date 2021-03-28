@@ -14,7 +14,7 @@ PRMS=-
 REPORT=report.log
 REPORT_KW=
 CODECS=
-PRESETS=
+PRESET=
 THREADS=
 VECTORS=
 DIR_BIN=$(ospath "$dirScript"/../bin)
@@ -41,7 +41,7 @@ usage()
 	    -t|--threads <x> Number of threads to use
 	    -p|--prms    <x> Bitrate (kbps) or QP list. Default: "$PRMS".
 	                     Values less than 60 considered as QP.
-	       --preset  <x> Codec-specific list of 'preset' options (default: marked by *):
+	       --preset  <x> Codec-specific 'preset' options (default: marked by *):
 	                       ashevc:   *1 2 3 4 5 6
 	                       x265:     *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
 	                       kvazaar:  *ultrafast  superfast veryfast  faster fast medium slow slower veryslow placebo
@@ -84,7 +84,7 @@ entrypoint()
     esac
 
     local timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-	local cmd_report= cmd_prms= cmd_presets= endofflags=
+	local cmd_report= cmd_prms= endofflags=
 	local hide_banner= force= parse= decode=
 	local targetInfo=
 	while [[ "$#" -gt 0 ]]; do
@@ -96,7 +96,7 @@ entrypoint()
 			-c|--codec*) 	CODECS=$2;;
 			-t|--threads)   THREADS=$2;;
 			-p|--prms) 		cmd_prms=$2;;
-			   --preset) 	cmd_presets=$2;;
+			   --preset) 	PRESET=$2;;
 			-j|--ncpu)		NCPU=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; transport=adb; nargs=1;;
@@ -116,23 +116,14 @@ entrypoint()
 
 	[[ -n "$cmd_report" ]] && REPORT=${cmd_report//\\//}
 	[[ -n "$cmd_prms" ]] && PRMS=$cmd_prms
-	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
 
     VECTORS=${VECTORS# }
 
     # Currently only used by bd-rate script
     REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
 
-	PRESETS=${PRESETS:--}
 	# for multithreaded run, run in single process to get valid cpu usage estimation
 	[[ -n $THREADS && $THREADS -gt 1 ]] && NCPU=1
-
-    local numCodecs numPresets
-    list_size "$CODECS"; numCodecs=$REPLY
-    list_size "$PRESETS"; numPresets=$REPLY
-    if [[ $numCodecs -gt 1 ]]; then
-        [[ $numPresets -gt 1 ]] && error_exit "only single preset option allowed if multple codecs specified"
-    fi
 
 	if [[ $transport == adb || $transport == ssh ]] ; then
 		TARGET_setTarget $target "$dirScript"/../remote.local
@@ -160,7 +151,7 @@ entrypoint()
 	#
 	# Scheduling
 	#
-	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS" "$PRESETS"
+	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS"
 
 	local optionsFile="$dirTmp"/options.txt
 	prepare_optionsFile $target "$optionsFile" "$CODECS"
@@ -390,7 +381,7 @@ prepare_optionsFile()
 	for prm in $PRMS; do
 	for src in $VECTORS; do
 	for codecId in $CODECS; do
-	for preset in $PRESETS; do
+	for preset in ${PRESET:--}; do
         local info
         prepare_options $codecId $prm $src $preset >&2; info=$REPLY
 		printf '%s\n' "$info"
