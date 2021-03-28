@@ -83,9 +83,15 @@ entrypoint()
     update_PATH $dirScript/../bin
     export PATH
 
+    local target remote=false
+    case ${OS:-} in
+        *_NT) target=${target:-windows};;
+        *) target=${target:-linux};;
+    esac
+
 	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_ncpu= cmd_endofflags=
-	local hide_banner= target= force= parse= decode=
-	local remote=false targetInfo=
+	local hide_banner= force= parse= decode=
+	local targetInfo=
 	while [[ "$#" -gt 0 ]]; do
 		local nargs=2
 		case $1 in
@@ -122,7 +128,6 @@ entrypoint()
     # Currently only used by bd-rate script
     REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
 
-	target=${target:-windows}
 	PRESETS=${PRESETS:--}
 	# for multithreaded run, run in single process to get valid cpu usage estimation
 	[[ $THREADS -gt 1 ]] && NCPU=1
@@ -178,7 +183,7 @@ entrypoint()
 			encode=true
 		elif [[ $NCPU -eq 1 && ! -f "$outputDir/cpu.log" ]]; then
 			# cpu load monitoring is currently disabled for a remote run
-			! $remote && encode=true  # update CPU log
+			[[ $target == windows ]] && ! $remote && encode=true  # update CPU log
 		fi
 		if $encode; then
 			# clean up target directory if we need to start from a scratch
@@ -645,7 +650,7 @@ encode_single_file()
 
 		# Make estimates only if one instance of the encoder is running at a time
 		local estimate_execution_time=false
-		if [[ $NCPU == 1 ]]; then
+		if [[ $target == windows && $NCPU == 1 ]]; then
 			estimate_execution_time=true
 		fi
 
