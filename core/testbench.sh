@@ -17,10 +17,7 @@ CODECS="ashevc x265 kvazaar kingsoft ks intel_sw intel_hw h265demo h265demo_v2 h
 "h264aspt vp8 vp9 vvenc vvenc2 vvencff"
 PRESETS=
 THREADS=
-VECTORS="
-	akiyo_352x288_30fps.yuv
-	foreman_352x288_30fps.yuv
-"
+VECTORS=
 DIR_BIN=$(ospath "$dirScript"/../bin)
 DIR_OUT=$(ospath "$dirScript"/../out)
 DIR_VEC=$(ospath "$dirScript"/../vectors)
@@ -89,14 +86,14 @@ entrypoint()
         *) target=${target:-linux};;
     esac
 
-	local cmd_vec= cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_ncpu= cmd_endofflags=
+	local cmd_report= cmd_codecs= cmd_threads= cmd_prms= cmd_presets= cmd_ncpu= cmd_endofflags=
 	local hide_banner= force= parse= decode=
 	local targetInfo=
 	while [[ "$#" -gt 0 ]]; do
 		local nargs=2
 		case $1 in
 			-h|--help)		usage && return;;
-			-i|--in*) 		cmd_vec="$cmd_vec $2";;
+			-i|--in*) 		VECTORS="$VECTORS $2";;
 			-o|--out*) 		cmd_report=$2;;
 			-c|--codec*) 	cmd_codecs=$2;;
 			-t|--threads)   cmd_threads=$2;;
@@ -118,12 +115,13 @@ entrypoint()
 		[[ -n "$cmd_endofflags" ]] && break
 	done
 	[[ -n "$cmd_report" ]] && REPORT=${cmd_report//\\//}
-	[[ -n "$cmd_vec" ]] && VECTORS=${cmd_vec# }
 	[[ -n "$cmd_codecs" ]] && CODECS=$cmd_codecs
 	[[ -n "$cmd_threads" ]] && THREADS=$cmd_threads
 	[[ -n "$cmd_prms" ]] && PRMS=$cmd_prms
 	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
 	[[ -n "$cmd_ncpu" ]] && NCPU=$cmd_ncpu
+
+    VECTORS=${VECTORS# }
 
     # Currently only used by bd-rate script
     REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
@@ -236,7 +234,7 @@ entrypoint()
 		for outputDirRel in $encodeList; do
 			echo "$self --ncpu $NCPU $cpumon -- encode_single_file $transport $outputDirRel"
 		done > $testplan
-		execute_plan $testplan $NCPU
+		execute_plan $testplan $dirTmp $NCPU
 	fi
 	progress_end
 
@@ -249,7 +247,7 @@ entrypoint()
 		for outputDirRel in $decodeList; do
 			echo "$self -- decode_single_file $outputDirRel"
 		done > $testplan
-		execute_plan $testplan $NCPU
+		execute_plan $testplan $dirTmp $NCPU
 	fi
 	progress_end
 
@@ -262,7 +260,7 @@ entrypoint()
 		for outputDirRel in $parseList; do
 			echo "$self -- parse_single_file $outputDirRel"
 		done > $testplan
-		execute_plan $testplan $NCPU
+		execute_plan $testplan $dirTmp $NCPU
 	fi
 	progress_end
 
@@ -423,6 +421,7 @@ prepare_optionsFile()
 execute_plan()
 {
 	local testplan=$1; shift
+    local dirTmp=$1; shift
 	local ncpu=$1; shift
 	"$dirScript/rpte2.sh" $testplan -p $dirTmp -j $ncpu
 }
