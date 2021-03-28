@@ -5,8 +5,7 @@ https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z
 
 # Encoders
 https://software.intel.com/sites/default/files/managed/61/d0/MediaSamples_MSDK_2017_8.0.24.271.msi
-https://github.com/ksvc/ks265codec/raw/master/win/AppEncoder_x64.exe
-https://github.com/ksvc/ks265codec/raw/master/android_arm64/appencoder
+https://github.com/ksvc/ks265codec/archive/master.zip
 https://github.com/ultravideo/kvazaar/releases/download/v1.3.0/Win64-Release.zip
 # https://builds.x265.eu/x265-64bit-8bit-latest.exe
 # http://msystem.waw.pl/x265/x265-3.4+1-7b12030-stable_vs2019-AVX2.7z
