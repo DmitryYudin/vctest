@@ -84,7 +84,7 @@ entrypoint()
     esac
 
     local timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
-	local cmd_report= cmd_threads= cmd_prms= cmd_presets= endofflags=
+	local cmd_report= cmd_prms= cmd_presets= endofflags=
 	local hide_banner= force= parse= decode=
 	local targetInfo=
 	while [[ "$#" -gt 0 ]]; do
@@ -94,7 +94,7 @@ entrypoint()
 			-i|--in*) 		VECTORS="$VECTORS $2";;
 			-o|--out*) 		cmd_report=$2;;
 			-c|--codec*) 	CODECS=$2;;
-			-t|--threads)   cmd_threads=$2;;
+			-t|--threads)   THREADS=$2;;
 			-p|--prms) 		cmd_prms=$2;;
 			   --preset) 	cmd_presets=$2;;
 			-j|--ncpu)		NCPU=$2;;
@@ -115,7 +115,6 @@ entrypoint()
     local dirTmp=$(tempdir)/vctest/$timestamp
 
 	[[ -n "$cmd_report" ]] && REPORT=${cmd_report//\\//}
-	[[ -n "$cmd_threads" ]] && THREADS=$cmd_threads
 	[[ -n "$cmd_prms" ]] && PRMS=$cmd_prms
 	[[ -n "$cmd_presets" ]] && PRESETS=$cmd_presets
 
