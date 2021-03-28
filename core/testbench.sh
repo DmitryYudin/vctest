@@ -377,15 +377,13 @@ prepare_optionsFile()
         REPLY=$info
     }
 
-	local prm= src= codecId= preset= infoTmpFile=$(mktemp)
+	local prm= src= codecId= infoTmpFile=$(mktemp)
 	for prm in $PRMS; do
 	for src in $VECTORS; do
 	for codecId in $CODECS; do
-	for preset in ${PRESET:--}; do
         local info
-        prepare_options $codecId $prm $src $preset >&2; info=$REPLY
+        prepare_options $codecId $prm $src ${PRESET:--} >&2; info=$REPLY
 		printf '%s\n' "$info"
-	done
 	done
 	done
 	done > $infoTmpFile
