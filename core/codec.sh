@@ -193,7 +193,7 @@ codec_verify()
 	local target=$1; shift
 	local CODECS=$1; shift
 
-	local codecId= cmd= codecEnabled= encExe= codecRemoved=
+	local encExe=
 	local dirOut=$(mktemp -d)
 
 	trap 'rm -rf -- "$dirOut"' EXIT
@@ -202,11 +202,32 @@ codec_verify()
     # Avoid temporary files to appear in a root folder
     pushd "$dirOut" >/dev/null
 
-	for codecId in $CODECS; do
+    local codecId_ok= codecId_fail=
+
+    codecopt_init "$CODECS"
+    CODECS=
+    while codecopt_next; do
+        local CODEC_LONG=$REPLY
+
+        codecopt_parse "$CODEC_LONG"
+        local codecId=${REPLY%%:*} knownCodecId=
+
+        local knownStatus=
+        for knownCodecId in $codecId_ok;   do [[ $knownCodecId == $codecId ]] && knownStatus=1; done
+        for knownCodecId in $codecId_fail; do [[ $knownCodecId == $codecId ]] && knownStatus=2; done
+
+        if [[ $knownStatus == 1 ]]; then
+    		CODECS="$CODECS $CODEC_LONG"
+            continue;
+        fi
+        if [[ $knownStatus == 2 ]]; then
+            continue;
+        fi
+
 		if codec_exe $codecId $target do_not_exit; then
             encExe=$REPLY
         else
-            codecRemoved="$codecRemoved $codecId"
+            codecId_fail="$codecId_fail $codecId"
 			continue
 		fi
 		if [[ $transport == local || $transport == condor ]]; then
@@ -222,15 +243,16 @@ codec_verify()
 
 			if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
 				echo "warning: encoding error. Remove '$codecId' from a list." >&2;
-                codecRemoved="$codecRemoved $codecId"
+                codecId_fail="$codecId_fail $codecId"
                 continue
 			fi
 		fi
-		codecEnabled="$codecEnabled $codecId"
+        codecId_ok="$codecId_ok $codecId"
+		CODECS="$CODECS $CODEC_LONG"
 	done
     popd >/dev/null
-    [[ -n "$codecRemoved" ]] && echo "Codecs removed:$codecRemoved" >&2
-	CODECS=${codecEnabled# }
+    [[ -n "$codecId_fail" ]] && echo "Codecs removed:$codecId_fail" >&2
+	CODECS=${CODECS# }
 
 	rm -rf -- "$dirOut"
 	trap - EXIT
@@ -246,7 +268,14 @@ codec_verify()
 		TARGET_exec "chmod +x $remoteDirCore/executor.sh"
 
 		print_console "Push codecs to remote machine $remoteDirBin ...\n"
-		for codecId in $CODECS; do
+
+        codecopt_init "$CODECS"
+        while codecopt_next; do
+            local CODEC_LONG=$REPLY
+
+            codecopt_parse "$CODEC_LONG"
+            local codecId=${REPLY%%:*}
+
             codec_exe $codecId $target; encExe=$REPLY
 
             local remoteEncExe=$remoteDirBin/$encExe
@@ -899,3 +928,128 @@ src_vvencff2() { src_vvencff "$@"; }
 dst_vvencff2() { dst_vvencff "$@"; }
 cmd_vvencff2() { cmd_vvencff "$@"; }
 
+CODECOPT_LIST=
+CODECOPT_PRESET=
+CODECOPT_THREADS=
+CODECOPT_EXTRA=
+#
+# remove possible delimiters from '-c' option argument:
+# "ks; ks --profile fast" -> "ks ks--profile"
+#
+codecopt_init()
+{
+    local CODECS=$1; shift
+    local PRESET= THREADS= EXTRA=
+    if [[ $# -gt 0 ]]; then
+        PRESET=$1; shift
+        THREADS=$1; shift
+        EXTRA=$1; shift
+    fi
+
+    # remove possible delimiters & shrink spaces
+    CODECS=$(echo "${CODECS//;/ }" | tr -s "[:space:]")
+
+    local known_codecs token
+    codec_get_knownId; known_codecs=$REPLY
+
+    # preppend codecId with delimiter
+    REPLY=
+    for token in $CODECS; do
+        local found=false
+        for known_codec in $known_codecs; do
+            [[ $token == $known_codec ]] && found=true
+        done
+        local delim
+        $found && delim=';' || delim=' '
+        REPLY=$REPLY$delim$token
+    done
+    CODECS=${REPLY#;}
+
+    # remove dublicates
+    local IFS=';' codec_long visited_list=
+    set -- $CODECS
+    for codec_long; do
+        shift
+        local found=false
+        for REPLY in $visited_list; do
+            [[ "$codec_long" == "$REPLY" ]] && found=true && break
+        done
+        $found && continue
+        set -- "$@" "$codec_long"
+        visited_list="$visited_list;$codec_long"
+    done
+    CODECOPT_LIST="$*"
+    CODECOPT_PRESET=$PRESET
+    CODECOPT_THREADS=$THREADS
+    CODECOPT_EXTRA=$EXTRA
+    unset IFS
+}
+codecopt_next()
+{
+    local IFS=';'
+    set -- $CODECOPT_LIST
+    [[ $# == 0 ]] && REPLY= && return 1
+    REPLY=$1
+    shift
+    CODECOPT_LIST="$*"
+    unset IFS
+}
+codecopt_parse()
+{
+    local CODEC_LONG=$1; shift
+
+    REPLY=$CODEC_LONG
+    local codecId=${REPLY%% *}; REPLY=${REPLY#$codecId}; REPLY=${REPLY# }
+    set -- $REPLY # rest of string
+    local skip_next= prms= preset= threads=
+    for REPLY; do
+        shift
+        [[ -n $skip_next ]] && skip_next= && continue
+        case $REPLY in
+            -p|--prms) prms=$1; skip_next=$REPLY;;
+               --preset) preset=$1; skip_next=$REPLY;;
+            -t|--threads) threads=$1; skip_next=$REPLY;;
+            *) set -- "$@" "$REPLY";;
+        esac        
+    done
+    if [[ -z "$preset" ]]; then
+        [[ -n "$CODECOPT_PRESET" ]] && REPLY=$CODECOPT_PRESET || codec_default_preset $codecId
+        preset=$REPLY
+    fi
+    if [[ -z "$threads" ]]; then
+        [[ -n $CODECOPT_THREADS ]] && REPLY=$CODECOPT_THREADS || REPLY=1
+        threads=$REPLY
+    fi
+
+    if [[ -n "$CODECOPT_EXTRA" ]]; then
+        set -- "$@" $CODECOPT_EXTRA
+    fi
+
+    REPLY="$codecId:$prms:$preset:$threads:$*"
+}
+
+if [[ "$(basename ${BASH_SOURCE-utility_functions.sh})" == "$(basename $0)" ]]; then
+entrypoint()
+{
+    local opt="ks --prms 150 ; ks ks --prms 50 --preset fast; h265demo -i   in.yuv; vp8 -t 5; vp8   p1 p2 --p3"
+
+    codecopt_init "$opt"
+
+    while codecopt_next; do
+        local CODEC_LONG=$REPLY
+        codecopt_parse "$CODEC_LONG"
+        local codecId=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        local codec_prms=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        local codec_preset=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        local codec_threads=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        local codec_args=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        printf "codecId=%-8s prms=%-4s preset=%-8s threads=%-1s args=%s\n" \
+            $codecId "$codec_prms" "$codec_preset" "$codec_threads" "$codec_args"
+    done
+
+    local opt=$REPLY
+}
+
+entrypoint "$@"
+
+fi

@@ -4,6 +4,7 @@ set -eu -o pipefail
 # First codec used as the BD-rate reference. The ';' delimiter is optional.
 CODECS=
 CODECS="$CODECS; kingsoft"
+CODECS="$CODECS; kingsoft --preset ultrafast -me 4 -subme 2"
 CODECS="$CODECS; kingsoft --preset ultrafast"
 CODECS="$CODECS; kingsoft --preset superfast"
 CODECS="$CODECS; kingsoft --preset fast"

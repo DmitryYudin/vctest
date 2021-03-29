@@ -16,6 +16,8 @@ REPORT=report.log
 CODECS=
 PRESET=
 THREADS=
+EXTRA=
+KEYS="gPSNR gSSIM"
 VECTORS=
 DIR_BIN=$(ospath $dirScript/../bin)
 DIR_OUT=$(ospath $dirScript/../out)
@@ -37,6 +39,8 @@ usage()
 	    -i|--input   <x> Input YUV files relative to '/vectors' directory. Multiple '-i vec' allowed.
 	                     '/vectors' <=> '$(ospath "$dirScript/../vectors")'
 	    -o|--output  <x> Report path. Default: "$REPORT".
+	       --bdrate      Generate BD-rate report
+	       --keys    <x> BD-rate report keys (default: $KEYS)
 	    -c|--codec   <x> Codecs list.
 	    -t|--threads <x> Number of threads to use
 	    -p|--prms    <x> Bitrate (kbps) or QP list. Default: "$PRMS".
@@ -56,6 +60,7 @@ usage()
 	                       vp8: 0 (slow) - 16 (fast)
 	                       vp9: 0 (slow) -  9 (fast)
 	                       vvenc*: *faster, fast, medium, slow, slower
+	       --extra   <x> List of additional codec-specific parameters to append to the end of arguments list
 	    -j|--ncpu    <x> Number of encoders to run in parallel. The value of '0' will run as many encoders as many
 	                     CPUs available. Default: $NCPU
 	                     Note, execution time based profiling data (CPU consumption and FPS estimation) is not
@@ -86,17 +91,20 @@ entrypoint()
 
     local timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 	local endofflags=
-	local hide_banner= force= parse= decode=
+	local hide_banner= force= parse= decode= bdrate=
 	while [[ $# -gt 0 ]]; do
 		local nargs=2
 		case $1 in
 			-h|--help)		usage && return;;
 			-i|--in*) 		VECTORS="$VECTORS $2";;
 			-o|--out*) 		REPORT=${2//\\//};;
+			   --bdrate) 	bdrate=1; nargs=1;;
+			   --keys) 	    KEYS=$2;;
 			-c|--codec*) 	CODECS=$2;;
 			-t|--threads)   THREADS=$2;;
 			-p|--prms) 		PRMS=$2;;
 			   --preset) 	PRESET=$2;;
+			   --extra) 	EXTRA=$2;;
 			-j|--ncpu)		NCPU=$2;;
 			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; transport=adb; nargs=1;;
@@ -145,6 +153,13 @@ entrypoint()
 
     mkdir -p $dirTmp
 
+    local CODEC_CNT= # just for the progress display
+    codecopt_init "$CODECS"
+    while codecopt_next; do
+        local CODEC_LONG=$REPLY
+        CODEC_CNT="$CODEC_CNT x"
+    done
+
     local do_encdec=
 #   [[ $transport == local ]] && do_encdec=1
     [[ $transport == condor ]] && do_encdec=1
@@ -156,12 +171,12 @@ entrypoint()
 	#
 	# Scheduling
 	#
-	progress_begin "Scheduling..." "$PRMS" "$VECTORS" "$CODECS"
+	progress_begin "Scheduling..." "$PRMS" "$VECTORS" "$CODEC_CNT"
 
 	local optionsFile=$dirTmp/options.txt
 	prepare_optionsFile $target "$optionsFile" "$CODECS"
 
-	local encodeList= decodeList= parseList= reportList= encdecList=
+	local encodeList= decodeList= parseList= encdecList=
 	while read info; do
 		local encExeHash encCmdHash encFmt
 		dict_getValue "$info" encExeHash; encExeHash=$REPLY
@@ -202,7 +217,6 @@ entrypoint()
            -n $do_decode ]] && encdecList="$encdecList $outputDirRel"
         [[ -n $do_decode ]] && decodeList="$decodeList $outputDirRel"
         [[ -n $do_parse ]]  && parseList="$parseList $outputDirRel"
-		reportList="$reportList $outputDirRel"
 
 		progress_next $outputDirRel
 
@@ -331,8 +345,13 @@ entrypoint()
     #
     # Backup executables
     #
-    local codecId
-	for codecId in $CODECS; do
+    codecopt_init "$CODECS"
+    while codecopt_next; do
+        local CODEC_LONG=$REPLY
+
+        codecopt_parse "$CODEC_LONG"
+        local codecId=${REPLY%%:*};
+
         local backupDir encoderDir
 		codec_hash $codecId $target; backupDir=$DIR_OUT/$REPLY/exe
         [[ -d $backupDir ]] && continue
@@ -345,27 +364,97 @@ entrypoint()
 	#
 	# Reporting
 	#
-	progress_begin "Reporting..."	"$reportList"
+	progress_begin "Reporting..." "$PRMS" "$VECTORS" "$CODEC_CNT"
 
-    # Currently only used by bd-rate script
-    local REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
+   	local test_info="$timestamp $target:$transport [PRMS:$PRMS][EXTRA:$EXTRA]${targetInfo:+[$targetInfo]}"
 
-    local test_info="$timestamp $target:$transport [PRMS:$PRMS]${targetInfo:+[$targetInfo]}"
-	if [[ -z $hide_banner ]]; then
-		echo "$test_info" | tee -a $REPORT $REPORT_KW >/dev/null
+    local have_codec_specific_args=
+    codecopt_init "$CODECS" "$PRESET" "$THREADS" ""
+    set --
+    while codecopt_next; do
+        local CODEC_LONG=$REPLY
+        set -- "$@" "$CODEC_LONG"
+        codecopt_parse "$CODEC_LONG"
+        local codec_args=${REPLY#*:*:*:*:}
+        [[ -n "$codec_args" ]] && have_codec_specific_args=1
+    done
 
-		output_legend
-		output_header >> $REPORT
-	fi
-	for outputDirRel in $reportList; do
-		progress_next $outputDirRel
-		report_single_file $REPORT $REPORT_KW $outputDirRel
-	done
+    local report_idx=0 ref_kw CODEC_LONG=
+    for CODEC_LONG; do
+
+	    local optionsFile=$dirTmp/options_report.txt
+    	prepare_optionsFile $target $optionsFile "$CODEC_LONG"
+
+    	local reportList= exeHash= info
+    	while read info; do
+	    	local encExeHash encCmdHash
+    		dict_getValue "$info" encExeHash; encExeHash=$REPLY
+	    	dict_getValue "$info" encCmdHash; encCmdHash=$REPLY
+    		local outputDirRel=$encExeHash/$encCmdHash
+    		reportList="$reportList $outputDirRel"
+
+            exeHash=$encExeHash # memorize for later use
+        done<$optionsFile
+        rm -f $optionsFile
+
+        local report=$REPORT report_kw=/dev/null report_bdrate=/dev/null
+        if [[ -n $bdrate ]]; then
+            report=$DIR_OUT/bdrate_${timestamp}_${report_idx}.log
+            report_kw=$DIR_OUT/bdrate_${timestamp}_${report_idx}.kw
+            report_bdrate=$DIR_OUT/bdrate_${timestamp}.log
+            [[ $report_idx == 0 ]] && ref_kw=$report_kw
+            hide_banner=
+        fi
+
+        if [[ -z $hide_banner ]]; then
+
+            echo "$test_info" | tee -a $report $report_kw $report_bdrate >/dev/null
+
+            output_legend
+            output_header >> $report
+
+            hide_banner=1
+        fi
+
+        if [[ -n $have_codec_specific_args ]]; then
+            codecopt_parse "$CODEC_LONG"
+            local codec_args=${REPLY#*:*:*:*:}
+            echo "Codec specific options: $codec_args"
+        fi | tee -a $report $report_bdrate >/dev/null
+
+    	for outputDirRel in $reportList; do
+    		progress_next $outputDirRel
+	    	report_single_file $report $report_kw $outputDirRel
+        done
+
+        if [[ -n $bdrate ]]; then
+            codecopt_parse "$CODEC_LONG"
+            local codecId=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+            local codec_prms=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+            local codec_preset=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+            local codec_threads=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+            local codec_args=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+            local tag="$exeHash[$codec_preset:$codec_threads]${codec_prms:+[$codec_prms]}${codec_args:+<$codec_args>}"
+            if [[ $report_idx == 0 ]]; then
+                echo "$test_info"
+                echo "ref:$tag"
+            else
+                echo "tst:$tag"
+                $dirScript/bdrate/bdrate.sh -i $ref_kw -i $report_kw --key "$KEYS"
+            fi | tee -a $REPORT $report_bdrate >/dev/null
+        fi
+        report_idx=$((report_idx+1))
+    done
 	progress_end
 
 	local duration=$(( SECONDS - startSec ))
 	duration=$(date +%H:%M:%S -u -d @${duration})
 	print_console "$duration >>>> $REPORT $test_info\n"
+
+    if [[ -n $bdrate ]]; then
+        local report_bdrate=$DIR_OUT/bdrate_${timestamp}.log
+        grep -e '<<< average >>>' -e '^tst:' -e '^ref:' $report_bdrate
+    fi
 }
 
 vectors_verify()
@@ -408,25 +497,29 @@ prepare_optionsFile()
     local CODECS="$@"
 
     prepare_options() {
-        local codecId=$1; shift
+        local CODEC_LONG=$1; shift
         local prm=$1; shift
         local src=$1; shift
-        local preset=$1; shift
+
+        codecopt_parse "$CODEC_LONG"
+        local codecId=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        local codec_prms=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        local codec_preset=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        local codec_threads=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+        local codec_args=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
 
     	if [[ $prm == '-' ]]; then
-            error_exit "rate parameter '--prms' not set"
+            if [[ -n $codec_prms ]]; then
+                prm=$codec_prms
+            else
+                error_exit "rate parameter '--prms' not set"
+            fi
         fi
 		local qp=- bitrate=-
 		[[ $prm -lt 60 ]] && qp=$prm || bitrate=$prm
 
-    	if [[ $preset == '-' ]]; then
-            codec_default_preset $codecId; preset=$REPLY
-        fi
-
-        local threads=$THREADS
-        if [[ -z $threads ]]; then
-            threads=1
-        fi
+        local preset=$codec_preset
+        local threads=$codec_threads
 
 		local srcRes= srcFps= srcNumFr=
 		detect_resolution_string $DIR_VEC/$src; srcRes=$REPLY
@@ -443,6 +536,7 @@ prepare_optionsFile()
 		codec_fmt $codecId; encFmt=$REPLY
 		codec_hash $codecId $target; encExeHash=$REPLY
 		codec_cmdArgs $codecId $args; encCmdArgs=$REPLY
+		[[ -z "$codec_args" ]] || encCmdArgs="$encCmdArgs $codec_args"
 
 		local SRC=${src//\\/}; SRC=${SRC##*[/\\]} # basename only
 		local dst=$SRC.$encFmt
@@ -455,13 +549,15 @@ prepare_optionsFile()
 
 	local prm= src= codecId= infoTmpFile=$(mktemp)
 	for prm in $PRMS; do
-	for src in $VECTORS; do
-	for codecId in $CODECS; do
-        local info
-        prepare_options $codecId $prm $src ${PRESET:--} >&2; info=$REPLY
-		printf '%s\n' "$info"
-	done
-	done
+    	for src in $VECTORS; do
+            codecopt_init "$CODECS" "$PRESET" "$THREADS" "$EXTRA"
+            while codecopt_next; do
+                local CODEC_LONG=$REPLY
+                local info
+                prepare_options "$CODEC_LONG" $prm $src >&2; info=$REPLY
+        		printf '%s\n' "$info"
+        	done
+    	done
 	done > $infoTmpFile
 
 	local hashTmpFile=$(mktemp)
