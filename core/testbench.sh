@@ -133,7 +133,7 @@ entrypoint()
 	vectors_verify $transport $VECTORS; VECTORS=$REPLY
 
 	# Remove codecs we can't run
-	codec_verify $transport $target $CODECS; CODECS=$REPLY
+	codec_verify $transport $target "$CODECS"; CODECS=$REPLY
     [[ -z "$CODECS" ]] && error_exit "no codecs to test"
 
 	local startSec=$SECONDS
