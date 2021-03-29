@@ -275,7 +275,7 @@ entrypoint()
 		echo "$timestamp $info" >> $REPORT_KW
 
 		output_legend
-		output_header
+		output_header >> $REPORT
 	fi
 	for outputDirRel in $reportList; do
 		progress_next $outputDirRel
@@ -517,7 +517,7 @@ output_header()
 	printf 	-v str "%s %5s %5s %5s"             "$str" I% P% Skip%
 	printf 	-v str "%s %s"                      "$str" SRC
 
-	echo "$str" >> "$REPORT"
+	echo "$str"
 }
 output_legend()
 {
