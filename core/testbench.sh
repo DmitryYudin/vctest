@@ -130,9 +130,11 @@ entrypoint()
 	mkdir -p $DIR_OUT $(dirname $REPORT)
 
 	# Remove non-existing and set abs-path
+    print_console "Verify test vectors...\n"
 	vectors_verify $transport $VECTORS; VECTORS=$REPLY
 
 	# Remove codecs we can't run
+    print_console "Verify codecs...\n"
 	codec_verify $transport $target "$CODECS"; CODECS=$REPLY
     [[ -z "$CODECS" ]] && error_exit "no codecs to test"
 
@@ -140,10 +142,13 @@ entrypoint()
 
     mkdir -p $dirTmp
 
+    local num_stages=5
+    progress_init $num_stages
+
 	#
 	# Scheduling
 	#
-	progress_begin "[1/5] Scheduling..." "$PRMS" "$VECTORS" "$CODECS"
+	progress_begin "Scheduling..." "$PRMS" "$VECTORS" "$CODECS"
 
 	local optionsFile=$dirTmp/options.txt
 	prepare_optionsFile $target "$optionsFile" "$CODECS"
@@ -207,7 +212,7 @@ entrypoint()
 	#
 	# Encoding
 	#
-	progress_begin "[2/5] Encoding..." "$encodeList"
+	progress_begin "Encoding..." "$encodeList"
 	if [[ -n "$encodeList" ]]; then
         local cpumon=
         [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon=--mon
@@ -235,7 +240,7 @@ entrypoint()
 	# Parsing
 	#
 	NCPU=-3 # use (all + 2) cores
-	progress_begin "[4/5] Parsing..." "$parseList"
+	progress_begin "Parsing..." "$parseList"
 	if [[ -n "$parseList" ]]; then
 		for outputDirRel in $parseList; do
 			echo "$self -- parse_single_file $outputDirRel"
@@ -263,7 +268,7 @@ entrypoint()
 	#
 	# Reporting
 	#
-	progress_begin "[5/5] Reporting..."	"$reportList"
+	progress_begin "Reporting..."	"$reportList"
 
     # Currently only used by bd-rate script
     local REPORT_KW=$DIR_OUT/${REPORT##*/}.kw
@@ -428,14 +433,21 @@ stop_cpu_monitor()
 	PERF_ID=
 }
 
+PROGRESS_STAGE_TOTAL=
+PROGRESS_STAGE_IDX=
 PROGRESS_SEC=
 PROGRESS_HDR=
 PROGRESS_INFO=
 PROGRESS_CNT_TOT=0
 PROGRESS_CNT=0
+progress_init()
+{
+    PROGRESS_STAGE_TOTAL=$1
+    PROGRESS_STAGE_IDX=1
+}
 progress_begin()
 {
-	local name=$1; shift
+	local name="[$PROGRESS_STAGE_IDX/$PROGRESS_STAGE_TOTAL] $1"; shift
 	local str=
 	PROGRESS_SEC=$SECONDS
 	PROGRESS_HDR=
@@ -494,14 +506,14 @@ progress_next()
 }
 progress_end()
 {
-	[[ $PROGRESS_CNT == 0 ]] && return
+	if [[ $PROGRESS_CNT != 0 ]]; then
+        local duration=$(( SECONDS - PROGRESS_SEC ))
+        duration=$(date +%H:%M:%S -u -d @${duration})
 
-	local duration=$(( SECONDS - PROGRESS_SEC ))
-	duration=$(date +%H:%M:%S -u -d @${duration})
-
-	print_console "$duration $PROGRESS_INFO\n"
-
+        print_console "$duration $PROGRESS_INFO\n"
+    fi
 	PROGRESS_CNT_TOT=0
+    PROGRESS_STAGE_IDX=$((PROGRESS_STAGE_IDX+1))
 }
 
 output_header()
