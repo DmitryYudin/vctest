@@ -65,7 +65,6 @@ usage()
 	                     CPUs available. Default: $NCPU
 	                     Note, execution time based profiling data (CPU consumption and FPS estimation) is not
 	                     available in parallel execution mode.
-	       --hide        Do not print legend and header.
 	       --adb         Run Android@ARM using ADB. | Credentials are read from 'remote.local' file.
 	       --ssh         Run Linux@ARM using SSH.   |         (see example for details)
 	       --condor      Run with Condor
@@ -91,7 +90,7 @@ entrypoint()
 
     local timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 	local endofflags=
-	local hide_banner= force= parse= decode= bdrate=
+	local force= parse= decode= bdrate=
 	while [[ $# -gt 0 ]]; do
 		local nargs=2
 		case $1 in
@@ -106,7 +105,6 @@ entrypoint()
 			   --preset) 	PRESET=$2;;
 			   --extra) 	EXTRA=$2;;
 			-j|--ncpu)		NCPU=$2;;
-			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; transport=adb; nargs=1;;
 			   --ssh)       target=ssh; transport=ssh; nargs=1;;
 			   --condor)    target=linux; transport=condor; nargs=1;;
@@ -166,6 +164,7 @@ entrypoint()
 
     local num_stages=5
     [[ -n $do_encdec ]] && num_stages=$((num_stages-1))
+    [[ -n $bdrate ]] && num_stages=$((num_stages+1))
     progress_init $num_stages
 
 	#
@@ -368,84 +367,110 @@ entrypoint()
 
    	local test_info="$timestamp $target:$transport [PRMS:$PRMS][EXTRA:$EXTRA]${targetInfo:+[$targetInfo]}"
 
-    local have_codec_specific_args=
+    # Add all CODECS_LONG to argument list
     codecopt_init "$CODECS" "$PRESET" "$THREADS" ""
     set --
     while codecopt_next; do
         local CODEC_LONG=$REPLY
         set -- "$@" "$CODEC_LONG"
-        codecopt_parse "$CODEC_LONG"
-        local codec_args=${REPLY#*:*:*:*:}
-        [[ -n "$codec_args" ]] && have_codec_specific_args=1
     done
 
-    local report_idx=0 ref_kw CODEC_LONG=
+    # Generate optionFile(s) to process individual CODEC_LONG
+    local report_idx=0 CODEC_LONG=
     for CODEC_LONG; do
-
-	    local optionsFile=$dirTmp/options_report.txt
+	    local optionsFile=$dirTmp/options_report-$report_idx.txt
     	prepare_optionsFile $target $optionsFile "$CODEC_LONG"
+        report_idx=$((report_idx+1))
+    done
 
-    	local reportList= exeHash= info
+    # Report
+    local report_idx=0 CODEC_LONG=
+    for CODEC_LONG; do
+	    local optionsFile=$dirTmp/options_report-$report_idx.txt
+    	local reportList= info exeHash
     	while read info; do
 	    	local encExeHash encCmdHash
     		dict_getValue "$info" encExeHash; encExeHash=$REPLY
 	    	dict_getValue "$info" encCmdHash; encCmdHash=$REPLY
     		local outputDirRel=$encExeHash/$encCmdHash
     		reportList="$reportList $outputDirRel"
-
-            exeHash=$encExeHash # memorize for later use
+            exeHash=$encExeHash
         done<$optionsFile
-        rm -f $optionsFile
 
-        local report=$REPORT report_kw=/dev/null report_bdrate=/dev/null
+        local report=$REPORT report_kw=/dev/null
         if [[ -n $bdrate ]]; then
             report=$DIR_OUT/bdrate_${timestamp}_${report_idx}.log
             report_kw=$DIR_OUT/bdrate_${timestamp}_${report_idx}.kw
-            report_bdrate=$DIR_OUT/bdrate_${timestamp}.log
-            [[ $report_idx == 0 ]] && ref_kw=$report_kw
-            hide_banner=
         fi
 
-        if [[ -z $hide_banner ]]; then
-
-            echo "$test_info" | tee -a $report $report_kw $report_bdrate >/dev/null
+        if [[ $report_idx == 0 ]]; then
 
             output_legend
-            output_header >> $report
 
-            hide_banner=1
+            echo "$test_info" | tee -a $report $report_kw >/dev/null
         fi
 
-        if [[ -n $have_codec_specific_args ]]; then
-            codecopt_parse "$CODEC_LONG"
-            local codec_args=${REPLY#*:*:*:*:}
-            echo "Codec specific options: $codec_args"
-        fi | tee -a $report $report_bdrate >/dev/null
+
+        local tag=
+        codecop_get_tag "$CODEC_LONG" $exeHash; tag=$REPLY
+
+        echo "tst:$tag" >> $report
+        output_header >> $report
 
     	for outputDirRel in $reportList; do
     		progress_next $outputDirRel
 	    	report_single_file $report $report_kw $outputDirRel
         done
 
-        if [[ -n $bdrate ]]; then
-            codecopt_parse "$CODEC_LONG"
-            local codecId=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
-            local codec_prms=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
-            local codec_preset=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
-            local codec_threads=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
-            local codec_args=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
-            local tag="$exeHash[$codec_preset:$codec_threads]${codec_prms:+[$codec_prms]}${codec_args:+<$codec_args>}"
-            if [[ $report_idx == 0 ]]; then
-                echo "$test_info"
-                echo "ref:$tag"
-            else
-                echo "tst:$tag"
-                $dirScript/bdrate/bdrate.sh -i $ref_kw -i $report_kw --key "$KEYS"
-            fi | tee -a $REPORT $report_bdrate >/dev/null
-        fi
         report_idx=$((report_idx+1))
     done
-	progress_end
+   	progress_end
+
+	#
+	# Report bdrate
+	#
+    if [[ -n $bdrate ]]; then
+    	progress_begin "BD-Rate..." "$CODEC_CNT"
+        local report_idx=0 ref_kw CODEC_LONG= ref_tag
+        for CODEC_LONG; do
+    	    local optionsFile=$dirTmp/options_report-$report_idx.txt
+    
+        	local reportList= exeHash= info outputDirRel=
+        	while read info; do
+    	    	local encExeHash encCmdHash
+        		dict_getValue "$info" encExeHash; encExeHash=$REPLY
+    	    	dict_getValue "$info" encCmdHash; encCmdHash=$REPLY
+    		    outputDirRel=$encExeHash/$encCmdHash # report only
+                exeHash=$encExeHash # memorize for later use
+                break
+            done<$optionsFile
+        	progress_next $outputDirRel
+
+            local report=$DIR_OUT/bdrate_${timestamp}_${report_idx}.log
+            local report_kw=$DIR_OUT/bdrate_${timestamp}_${report_idx}.kw
+            local report_bdrate=$DIR_OUT/bdrate_${timestamp}.log
+            local tag=
+            codecop_get_tag "$CODEC_LONG" $exeHash; tag=$REPLY
+
+            if [[ $report_idx == 0 ]]; then
+                echo "$test_info" | tee -a $REPORT $report_bdrate >/dev/null
+                ref_kw=$report_kw
+                ref_tag=$tag
+            else
+                echo "tst:$tag ref:$ref_tag" | tee -a $REPORT $report_bdrate >/dev/null
+                $dirScript/bdrate/bdrate.sh -i $ref_kw -i $report_kw --key "$KEYS" | tee -a $REPORT $report_bdrate >/dev/null
+            fi
+
+            report_idx=$((report_idx+1))
+        done
+    	progress_end
+    fi
+
+    local report_idx=0 CODEC_LONG=
+    for CODEC_LONG; do
+	    local optionsFile=$dirTmp/options_report-$report_idx.txt
+        rm -f $optionsFile
+    done
 
 	local duration=$(( SECONDS - startSec ))
 	duration=$(date +%H:%M:%S -u -d @${duration})

@@ -1027,6 +1027,18 @@ codecopt_parse()
 
     REPLY="$codecId:$prms:$preset:$threads:$*"
 }
+codecop_get_tag()
+{
+    local CODEC_LONG=$1; shift
+    local exeHash=$1; shift
+    codecopt_parse "$CODEC_LONG"
+    local codecId=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+    local codec_prms=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+    local codec_preset=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+    local codec_threads=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+    local codec_args=${REPLY%%:*}; REPLY=${REPLY#${REPLY%%:*}:}
+    REPLY="$exeHash[$codec_preset:$codec_threads:$codec_prms:$codec_args]"
+}
 
 if [[ "$(basename ${BASH_SOURCE-utility_functions.sh})" == "$(basename $0)" ]]; then
 entrypoint()
