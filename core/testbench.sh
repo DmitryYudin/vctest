@@ -831,8 +831,8 @@ parse_single_file()
 
 	local cpuAvg=- extFPS=- intFPS=
 	if [[ -f encoded_cpu ]]; then # may not exist
-		cpuAvg=$(parse_cpuLog encoded_cpu)
-		printf -v cpuAvg "%.0f" "$cpuAvg"
+		parse_cpuLog encoded_cpu; cpuAvg=$REPLY
+		[[ $cpuAvg == '-' ]] || printf -v cpuAvg "%.0f" "$cpuAvg"
 	fi
 	if [[ -f encoded_sec ]]; then # may not exist
         local consumedSec
@@ -953,23 +953,14 @@ parse_framestat()
 
 parse_cpuLog()
 {
-	local log=$1; shift
-	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
-
-	if [[ $cpu_monitor_type == windows ]]; then
-#: <<'FORMAT'
-#                                                                             < skip (first line is empty)
-#"(PDH-CSV 4.0)","\\DESKTOP-7TTKF98\Process(sample_encode)\% Processor Time"  < skip
-#"04/02/2020 07:37:58.154","388.873717"                                       < count average
-#"04/02/2020 07:37:59.205","390.385101"
-#FORMAT
-		cat "$log" | tail -n +3 | cut -d, -f 2 | tr -d \" | 
-				awk '{ if ( $1 != "" && $1 > 0 ) { sum += $1; cnt++; } } END { print cnt !=0 ? sum / cnt : 0 }'
-	else
-		 # expect '%cpu' is a first column delimited by ' '
-		cat "$log" | cut -d' ' -f 1 | tr -d \" | 
-				awk '{ if ( $1 != "" && $1 > 0 ) { sum += $1; cnt++; } } END { print cnt !=0 ? sum / cnt : 0 }'
-	fi
+    local log=$1 endtime cpu=-
+    if endtime=$(grep '^[0-9]\+ (cat)' $log | tail -n1 | awk '{ print $22 }'); then
+        if ! cpu=$(grep -v '(cat)' $log | grep '^[0-9]\+ (.*)' | tail -n1 | \
+                    awk -v endtime=$endtime '{ print endtime != $22 ? 100*( $14 + $15 )/( endtime - $22 ) : 0 }'); then
+            cpu=-
+        fi
+    fi
+    REPLY=$cpu
 }
 
 parse_stdoutLog()
