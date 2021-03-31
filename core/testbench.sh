@@ -668,52 +668,19 @@ encode_single_file()
 		TARGET_getDataDir; remoteDirOut=$REPLY/vctest/out
 		remoteOutputDir=$remoteDirOut/$outputDirRel
 
+		local remoteDirBin remoteDirCore
+		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin remoteDirCore=$REPLY/vctest/core
 		TARGET_exec "
+            export codecId=$codecId
+            export encoderExe=$encoderExe
+            export encoderArgs=\"$encoderArgs\"
+            export bitstreamFile=$bitstreamFile
+            export monitorCpu=$monitorCpu
 			rm -rf $remoteOutputDir && mkdir -p $remoteOutputDir && cd $remoteOutputDir
-
-			# temporary hack, for backward compatibility (remove later)
-			[ $codecId == h265demo ] && echo \"\" > h265demo.cfg
-
-			start_cpu_monitor() {
-				local worker_pid=\$1; shift
-				{ while ps -o '%cpu=,cpu=' -p \$worker_pid >> encoded_cpu; do sleep .5s; done; } &
-				PERF_ID=\$!
-			}
-			stop_cpu_monitor() {
-				echo \"waiting CPU monitor with pid=\$PERF_ID to stop\"
-				kill \$PERF_ID && wait \$PERF_ID || true
-				echo \"CPU monitor stopped\"
-			}
-
-			consumedSec=\$(date +%s)
-            if [[ $ENABLE_CPU_MONITOR == 1 ]]; then # run decoder in background
-			    $remoteExe $args </dev/null 1>encoded_log 2>&1 &
-                pid=\$!
-            else
-			    $remoteExe $args </dev/null 1>encoded_log 2>&1
-            fi
-			error_code=0
-            if [[ $ENABLE_CPU_MONITOR == 1 ]]; then
-			    start_cpu_monitor \$pid
-			    wait \$pid || error_code=\$?
-            fi
-  			consumedSec=\$(( \$(date +%s) - consumedSec ))
-            if [[ $ENABLE_CPU_MONITOR == 1 ]]; then
-			    stop_cpu_monitor
-            fi
-
-			if [ \$error_code != 0 -o ! -f $dst ]; then
-				echo "" # newline if stderr==tty
-				cat encoded_log >&2
-				exit 1
-			fi
-
-			echo \$consumedSec > encoded_sec
-		"
+            $remoteDirCore/executor.sh encode
+        "
 		TARGET_pull $remoteOutputDir/. .
 		TARGET_exec "rm -rf $remoteOutputDir"
-
-		date "+%Y.%m.%d-%H.%M.%S" > encoded.ts
     else
         error_exit "encoding with transport=$transport not implemented" >&2
 	fi

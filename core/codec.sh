@@ -237,9 +237,14 @@ codec_verify()
 
 	if [[ $transport == adb || $transport == ssh ]]; then
 		# Push executable (folder content) on a target device
-		local remoteDirBin
-		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
-		TARGET_exec "mkdir -p $remoteDirBin"
+		local remoteDirBin remoteDirCore
+		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin remoteDirCore=$REPLY/vctest/core
+		TARGET_exec "mkdir -p $remoteDirBin $remoteDirCore"
+
+		print_console "Push executor script to remote machine $remoteDirCore ...\n"
+		TARGET_push $(ospath $dirScript/executor.sh) $remoteDirCore
+		TARGET_exec "chmod +x $remoteDirCore/executor.sh"
+
 		print_console "Push codecs to remote machine $remoteDirBin ...\n"
 		for codecId in $CODECS; do
             codec_exe $codecId $target; encExe=$REPLY
