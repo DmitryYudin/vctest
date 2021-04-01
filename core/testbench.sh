@@ -142,7 +142,11 @@ entrypoint()
 
     mkdir -p $dirTmp
 
+    local do_encdec=
+    [[ $transport == local ]] && do_encdec=1
+
     local num_stages=5
+    [[ -n $do_encdec ]] && num_stages=$((num_stages-1))
     progress_init $num_stages
 
 	#
@@ -153,7 +157,7 @@ entrypoint()
 	local optionsFile=$dirTmp/options.txt
 	prepare_optionsFile $target "$optionsFile" "$CODECS"
 
-	local encodeList= decodeList= parseList= reportList=
+	local encodeList= decodeList= parseList= reportList= encdecList=
 	while read info; do
 		local encExeHash encCmdHash encFmt
 		dict_getValue "$info" encExeHash; encExeHash=$REPLY
@@ -194,6 +198,8 @@ entrypoint()
 		fi
 
         [[ -n $do_encode ]] && encodeList="$encodeList $outputDirRel"
+        [[ -n $do_encode || \
+           -n $do_decode ]] && encdecList="$encdecList $outputDirRel"
         [[ -n $do_decode ]] && decodeList="$decodeList $outputDirRel"
         [[ -n $do_parse ]]  && parseList="$parseList $outputDirRel"
 		reportList="$reportList $outputDirRel"
@@ -209,33 +215,48 @@ entrypoint()
 
 	local testplan=$dirTmp/testplan.txt
 
-	#
-	# Encoding
-	#
-	progress_begin "Encoding..." "$encodeList"
-	if [[ -n "$encodeList" ]]; then
-        local cpumon=
-        [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon=--mon
-		for outputDirRel in $encodeList; do
-			echo "$self --ncpu $NCPU $cpumon -- encode_single_file $transport $outputDirRel"
-		done > $testplan
-		execute_plan $testplan $dirTmp $NCPU
-	fi
-	progress_end
+    if [[ -n $do_encdec ]]; then
+    	#
+	    # Encoding + Decoding
+    	#
+    	progress_begin "Encoding + Decoding..." "$encdecList"
+	    if [[ -n "$encdecList" ]]; then
+            local cpumon=
+            [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon=--mon
+	    	for outputDirRel in $encdecList; do
+		    	echo "$self --ncpu $NCPU $cpumon -- encdec_single_file $transport $outputDirRel"
+    		done > $testplan
+	   		execute_plan $testplan $dirTmp $NCPU
+    	fi
+    	progress_end
+    else
+		#
+		# Encoding
+    	#
+    	progress_begin "Encoding..." "$encodeList"
+		if [[ -n "$encodeList" ]]; then
+            local cpumon=
+            [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon=--mon
+			for outputDirRel in $encodeList; do
+				echo "$self --ncpu $NCPU $cpumon -- encode_single_file $transport $outputDirRel"
+			done > $testplan
+    		execute_plan $testplan $dirTmp $NCPU
+		fi
+		progress_end
 
-	#
-	# Decoding
-	#
-	NCPU=-2 # use (all+1) cores for decoding
-	progress_begin "[3/5] Decoding..." "$decodeList"
-	if [[ -n "$decodeList" ]]; then
-		for outputDirRel in $decodeList; do
-			echo "$self -- decode_single_file $transport $outputDirRel"
-		done > $testplan
-		execute_plan $testplan $dirTmp $NCPU
-	fi
-	progress_end
-
+    	#
+    	# Decoding
+    	#
+    	NCPU=-2 # use (all+1) cores for decoding
+    	progress_begin "Decoding..." "$decodeList"
+    	if [[ -n "$decodeList" ]]; then
+			for outputDirRel in $decodeList; do
+				echo "$self -- decode_single_file $transport $outputDirRel"
+			done > $testplan
+			execute_plan $testplan $dirTmp $NCPU
+    	fi
+    	progress_end
+    fi
 	#
 	# Parsing
 	#
@@ -602,6 +623,75 @@ report_single_file()
     { read -r dict; } < $outputDir/report.kw
 
 	output_report $report $report_kw "$info $dict"
+}
+
+encdec_single_file()
+{
+	local transport=$1; shift
+	local outputDirRel=$1; shift
+	local outputDir=$DIR_OUT/$outputDirRel
+	pushd $outputDir
+
+	local info= encCmdArgs= codecId= src= dst= encCmdSrc= encCmdDst= srcNumFr= encFmt= srcRes=
+    { read -r info; } < info.kw
+
+	dict_getValueEOL "$info" encCmdArgs; encCmdArgs=$REPLY
+	dict_getValue "$info" codecId; codecId=$REPLY
+	dict_getValue "$info" encExe; encExe=$REPLY
+	dict_getValue "$info" src; src=$REPLY
+	dict_getValue "$info" dst; dst=$REPLY
+	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
+	dict_getValue "$info" encFmt; encFmt=$REPLY
+	dict_getValue "$info" srcRes; srcRes=$REPLY
+
+    local remoteExe= remoteSrc=
+	if [[ $transport == local ]]; then
+        remoteExe=$DIR_BIN/$encExe
+        remoteSrc=$DIR_VEC/$src
+    else
+        error_exit "encoding+decoding with transport=$transport not implemented" >&2
+	fi
+
+	codec_cmdSrc $codecId $remoteSrc; encCmdSrc=$REPLY
+	codec_cmdDst $codecId $dst; encCmdDst=$REPLY
+
+	# temporary hack, for backward compatibility (remove later)
+	[[ $codecId == h265demo ]] && encCmdArgs="-c h265demo.cfg $encCmdArgs"
+
+	local args="$encCmdArgs $encCmdSrc $encCmdDst"
+	echo "$args" > input_args # memorize
+	echo "$remoteExe" > input_exe # memorize
+
+    # Make estimates only if one instance of the encoder is running at a time
+    local estimate_execution_time=0
+    if [[ $target == windows && $NCPU == 1 ]]; then
+        estimate_execution_time=1
+    fi
+
+    # Enc
+    export codecId=$codecId
+    export encoderExe=$remoteExe
+    export encoderArgs=$args
+    export bitstreamFile=$dst
+    export monitorCpu=$estimate_execution_time
+    # Dec
+    export originalYUV=$remoteSrc
+    export bitstreamFile=$dst
+    export bitstreamFmt=$encFmt
+    export resolutionWxH=$srcRes
+    export TRACE_HM=$TRACE_HM
+
+	if [[ $transport == local ]]; then
+
+        . $dirScript/executor.sh
+
+        executor encdec
+
+    else
+        error_exit "encoding+decoding with transport=$transport not implemented" >&2
+	fi
+
+	popd
 }
 
 encode_single_file()
