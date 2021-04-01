@@ -21,7 +21,7 @@ DIR_OUT=$(ospath $dirScript/../out)
 DIR_VEC=$(ospath $dirScript/../vectors)
 NCPU=0
 TRACE_HM=0
-ENABLE_CPU_MONITOR=0
+ENABLE_CPU_MONITOR=1
 
 readonly parsePy=$dirScript/../'core/parseTrace.py'
 
@@ -66,7 +66,7 @@ usage()
 	       --decode      Force decode stage
 	       --parse       Force parse stage
 	       --trace_hm    Collect H.265 stream info from HW decoder trace
-	       --mon         Monitor CPU load (always enabled for local run)
+	       --nomon       Disable CPU monitor
 	EOF
 }
 
@@ -103,7 +103,7 @@ entrypoint()
                --decode)    decode=1; nargs=1;;
                --parse)     parse=1; nargs=1;;
                --trace_hm)  TRACE_HM=1; nargs=1;;
-               --mon)       ENABLE_CPU_MONITOR=1; nargs=1;;
+               --nomon)     ENABLE_CPU_MONITOR=; nargs=1;;
 			   --)			endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
@@ -170,10 +170,6 @@ entrypoint()
 
         [[ -n $force ]] && do_encode=1
         [[ -z $do_encode && ! -f $outputDir/encoded.ts ]] && do_encode=1
-        if [[ -z $do_encode && $NCPU -eq 1 && ! -f $outputDir/encoded_cpu ]]; then
-			# cpu load monitoring is currently disabled for a remote run
-            [[ $target == windows && $transport == local ]] && do_encode=1 # update CPU log
-        fi
 
         [[ -n $do_encode ]] && do_decode=1
 		[[ -n $decode ]] && do_decode=1
@@ -222,7 +218,7 @@ entrypoint()
     	progress_begin "Encoding + Decoding..." "$encdecList"
 	    if [[ -n "$encdecList" ]]; then
             local cpumon=
-            [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon=--mon
+            [[ -z $ENABLE_CPU_MONITOR ]] && cpumon=--nomon
 	    	for outputDirRel in $encdecList; do
 		    	echo "$self --ncpu $NCPU $cpumon -- encdec_single_file $transport $outputDirRel"
     		done > $testplan
@@ -236,7 +232,7 @@ entrypoint()
     	progress_begin "Encoding..." "$encodeList"
 		if [[ -n "$encodeList" ]]; then
             local cpumon=
-            [[ $ENABLE_CPU_MONITOR == 1 ]] && cpumon=--mon
+            [[ -z $ENABLE_CPU_MONITOR ]] && cpumon=--nomon
 			for outputDirRel in $encodeList; do
 				echo "$self --ncpu $NCPU $cpumon -- encode_single_file $transport $outputDirRel"
 			done > $testplan
@@ -662,18 +658,12 @@ encdec_single_file()
 	echo "$args" > input_args # memorize
 	echo "$remoteExe" > input_exe # memorize
 
-    # Make estimates only if one instance of the encoder is running at a time
-    local estimate_execution_time=0
-    if [[ $target == windows && $NCPU == 1 ]]; then
-        estimate_execution_time=1
-    fi
-
     # Enc
     export codecId=$codecId
     export encoderExe=$remoteExe
     export encoderArgs=$args
     export bitstreamFile=$dst
-    export monitorCpu=$estimate_execution_time
+    export monitorCpu=$ENABLE_CPU_MONITOR
     # Dec
     export originalYUV=$remoteSrc
     export bitstreamFile=$dst
@@ -735,17 +725,11 @@ encode_single_file()
 	echo "$args" > input_args # memorize
 	echo "$remoteExe" > input_exe # memorize
 
-    # Make estimates only if one instance of the encoder is running at a time
-    local estimate_execution_time=0
-    if [[ $target == windows && $NCPU == 1 ]]; then
-        estimate_execution_time=1
-    fi
-
     export codecId=$codecId
     export encoderExe=$remoteExe
     export encoderArgs=$args
     export bitstreamFile=$dst
-    export monitorCpu=$estimate_execution_time
+    export monitorCpu=$ENABLE_CPU_MONITOR
 
 	if [[ $transport == local ]]; then
 
