@@ -9,6 +9,7 @@ dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 . $dirScript/utility_functions.sh
 . $dirScript/codec.sh
 . $dirScript/remote_target.sh
+. $dirScript/condor.sh
 
 PRMS=-
 REPORT=report.log
@@ -62,6 +63,7 @@ usage()
 	       --hide        Do not print legend and header.
 	       --adb         Run Android@ARM using ADB. | Credentials are read from 'remote.local' file.
 	       --ssh         Run Linux@ARM using SSH.   |         (see example for details)
+	       --condor      Run with Condor
 	       --force       Invalidate results cache
 	       --decode      Force decode stage
 	       --parse       Force parse stage
@@ -99,6 +101,7 @@ entrypoint()
 			   --hide)		hide_banner=1; nargs=1;;
 			   --adb)       target=adb; transport=adb; nargs=1;;
 			   --ssh)       target=ssh; transport=ssh; nargs=1;;
+			   --condor)    target=linux; transport=condor; nargs=1;;
                --force)     force=1; nargs=1;;
                --decode)    decode=1; nargs=1;;
                --parse)     parse=1; nargs=1;;
@@ -143,7 +146,8 @@ entrypoint()
     mkdir -p $dirTmp
 
     local do_encdec=
-    [[ $transport == local ]] && do_encdec=1
+#   [[ $transport == local ]] && do_encdec=1
+    [[ $transport == condor ]] && do_encdec=1
 
     local num_stages=5
     [[ -n $do_encdec ]] && num_stages=$((num_stages-1))
@@ -217,12 +221,25 @@ entrypoint()
     	#
     	progress_begin "Encoding + Decoding..." "$encdecList"
 	    if [[ -n "$encdecList" ]]; then
-            local cpumon=
-            [[ -z $ENABLE_CPU_MONITOR ]] && cpumon=--nomon
-	    	for outputDirRel in $encdecList; do
-		    	echo "$self --ncpu $NCPU $cpumon -- encdec_single_file $transport $outputDirRel"
-    		done > $testplan
-	   		execute_plan $testplan $dirTmp $NCPU
+	    	if [[ $transport == condor ]]; then
+    	    	CONDOR_setBatchname msk_$timestamp
+			    for outputDirRel in $encdecList; do
+				    encdec_single_file $transport $outputDirRel
+    			done > $dirTmp/submit_encdec.log
+	    		CONDOR_wait
+		    	for outputDirRel in $encdecList; do
+			    	local outputDir=$DIR_OUT/$outputDirRel
+				    [[ ! -f $outputDir/encoded.ts ]] && error_exit "encoding failed $outputDirRel"
+				    [[ ! -f $outputDir/decoded.ts ]] && error_exit "decoding failed $outputDirRel"
+    			done
+	    	else
+                local cpumon=
+                [[ -z $ENABLE_CPU_MONITOR ]] && cpumon=--nomon
+		    	for outputDirRel in $encdecList; do
+    		    	echo "$self --ncpu $NCPU $cpumon -- encdec_single_file $transport $outputDirRel"
+	    		done > $testplan
+		   		execute_plan $testplan $dirTmp $NCPU
+	   		fi
     	fi
     	progress_end
     else
@@ -231,12 +248,24 @@ entrypoint()
     	#
     	progress_begin "Encoding..." "$encodeList"
 		if [[ -n "$encodeList" ]]; then
-            local cpumon=
-            [[ -z $ENABLE_CPU_MONITOR ]] && cpumon=--nomon
-			for outputDirRel in $encodeList; do
-				echo "$self --ncpu $NCPU $cpumon -- encode_single_file $transport $outputDirRel"
-			done > $testplan
-    		execute_plan $testplan $dirTmp $NCPU
+			if [[ $transport == condor ]]; then
+    			CONDOR_setBatchname msk_e_$timestamp
+				for outputDirRel in $encodeList; do
+					encode_single_file $transport $outputDirRel
+				done > $dirTmp/submit_encoder.log
+				CONDOR_wait
+				for outputDirRel in $encodeList; do
+					local outputDir=$DIR_OUT/$outputDirRel
+					[[ ! -f $outputDir/encoded.ts ]] && error_exit "encoding failed $outputDirRel"
+				done
+			else
+				local cpumon=
+				[[ -z $ENABLE_CPU_MONITOR ]] && cpumon=--nomon
+				for outputDirRel in $encodeList; do
+					echo "$self --ncpu $NCPU $cpumon -- encode_single_file $transport $outputDirRel"
+				done > $testplan
+	    		execute_plan $testplan $dirTmp $NCPU
+			fi
 		fi
 		progress_end
 
@@ -246,10 +275,22 @@ entrypoint()
     	NCPU=-2 # use (all+1) cores for decoding
     	progress_begin "Decoding..." "$decodeList"
     	if [[ -n "$decodeList" ]]; then
-			for outputDirRel in $decodeList; do
-				echo "$self -- decode_single_file $transport $outputDirRel"
-			done > $testplan
-			execute_plan $testplan $dirTmp $NCPU
+    		if [[ $transport == condor ]]; then
+        		CONDOR_setBatchname msk_d_$timestamp
+        		for outputDirRel in $decodeList; do
+    	    		decode_single_file $transport $outputDirRel
+    			done > $dirTmp/submit_decoder.log
+    			CONDOR_wait
+    			for outputDirRel in $decodeList; do
+    				local outputDir=$DIR_OUT/$outputDirRel
+    				[[ ! -f $outputDir/decoded.ts ]] && error_exit "decoding failed $outputDirRel"
+    			done
+            else
+				for outputDirRel in $decodeList; do
+					echo "$self -- decode_single_file $transport $outputDirRel"
+				done > $testplan
+				execute_plan $testplan $dirTmp $NCPU
+			fi
     	fi
     	progress_end
     fi
@@ -644,6 +685,15 @@ encdec_single_file()
 	if [[ $transport == local ]]; then
         remoteExe=$DIR_BIN/$encExe
         remoteSrc=$DIR_VEC/$src
+	elif [[ $transport == condor ]]; then
+        remoteExe=$DIR_BIN/$encExe
+    	if [[ -z ${CONDOR_VECTORS:-} ]]; then
+            remoteSrc=$(basename $src)
+            src=$DIR_VEC/$src
+        else
+            remoteSrc=$CONDOR_VECTORS/$src
+            src= # do not transfer
+        fi
     else
         error_exit "encoding+decoding with transport=$transport not implemented" >&2
 	fi
@@ -677,6 +727,18 @@ encdec_single_file()
 
         executor encdec
 
+	elif [[ $transport == condor ]]; then
+
+        local executable=$dirScript/executor.sh
+        local arguments=encdec
+        local transfer="$src,$encoderExe"
+        local environment="codecId=$codecId;encoderExe=$(basename $encoderExe);encoderArgs=$encoderArgs;bitstreamFile=$bitstreamFile;monitorCpu=$monitorCpu"
+        environment="$environment;originalYUV=$originalYUV;bitstreamFile=$bitstreamFile;bitstreamFmt=$bitstreamFmt;resolutionWxH=$resolutionWxH;TRACE_HM=$TRACE_HM"
+        # not available on a remote machine
+        case $encFmt in h266) transfer="$transfer,$DIR_BIN/vvdecapp";; esac
+
+		CONDOR_makeTask "$executable" "$arguments" "$transfer" "$environment" encdec > encdec_condor.sub
+		CONDOR_submit encdec_condor.sub
     else
         error_exit "encoding+decoding with transport=$transport not implemented" >&2
 	fi
@@ -705,6 +767,15 @@ encode_single_file()
 	if [[ $transport == local ]]; then
         remoteExe=$DIR_BIN/$encExe
         remoteSrc=$DIR_VEC/$src
+	elif [[ $transport == condor ]]; then
+        remoteExe=$DIR_BIN/$encExe
+    	if [[ -z ${CONDOR_VECTORS:-} ]]; then
+            remoteSrc=$(basename $src)
+            src=$DIR_VEC/$src
+        else
+            remoteSrc=$CONDOR_VECTORS/$src
+            src= # do not transfer
+        fi
 	elif [[ $transport == adb || $transport == ssh ]]; then
 		local remoteDirBin= remoteDirVec=
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
@@ -736,6 +807,16 @@ encode_single_file()
         . $dirScript/executor.sh
 
         executor encode
+
+	elif [[ $transport == condor ]]; then
+
+        local executable=$dirScript/executor.sh
+        local arguments=encode
+        local transfer="$src,$encoderExe"
+        local environment="codecId=$codecId;encoderExe=$(basename $encoderExe);encoderArgs=$encoderArgs;bitstreamFile=$bitstreamFile;monitorCpu=$monitorCpu"
+
+		CONDOR_makeTask "$executable" "$arguments" "$transfer" "$environment" encoded > encoded_condor.sub
+		CONDOR_submit encoded_condor.sub
 
 	elif [[ $transport == adb || $transport == ssh ]]; then
 		local remoteDirOut remoteOutputDir
@@ -779,7 +860,18 @@ decode_single_file()
 	dict_getValue "$info" encFmt; encFmt=$REPLY
 	dict_getValue "$info" srcRes; srcRes=$REPLY
 
-    local remoteSrc=$DIR_VEC/$src
+    local remoteSrc
+    if [[ $transport == condor ]]; then
+    	if [[ -z "${CONDOR_VECTORS:-}" ]]; then
+            remoteSrc=$(basename "$src")
+            src=$DIR_VEC/$src
+        else
+            remoteSrc=$CONDOR_VECTORS/$src
+            src= # do not transfer
+        fi
+    else
+        remoteSrc=$DIR_VEC/$src
+    fi
 
     export originalYUV=$remoteSrc
     export bitstreamFile=$dst
@@ -787,9 +879,23 @@ decode_single_file()
     export resolutionWxH=$srcRes
     export TRACE_HM=$TRACE_HM
 
-    . $dirScript/executor.sh
+    if [[ $transport != condor ]]; then # execute locally
 
-    executor decode
+        . $dirScript/executor.sh
+
+        executor decode
+    else
+        local executable=$dirScript/executor.sh
+        local arguments=decode
+        local transfer="$src,$bitstreamFile"
+        local environment="originalYUV=$originalYUV;bitstreamFile=$bitstreamFile;bitstreamFmt=$bitstreamFmt;resolutionWxH=$resolutionWxH;TRACE_HM=$TRACE_HM"
+
+        # not available on a remote machine
+        case $encFmt in h266) transfer="$transfer,$DIR_BIN/vvdecapp";; esac
+
+		CONDOR_makeTask "$executable" "$arguments" "$transfer" "$environment" decoded > decoded_condor.sub
+		CONDOR_submit decoded_condor.sub
+    fi
 
     popd
 }
