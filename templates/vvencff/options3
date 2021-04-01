@@ -1,0 +1,182 @@
+# v.1.0.0
+
+#
+# Partitioning
+#
+--CTUSize=64  --MinQTISlice=4 --MinQTNonISlice=4 --MinQTChromaISliceInChromaSamples=2 --MaxMTTDepth=0 --MaxMTTDepthISliceL=0 --MaxMTTDepthISliceC=0 # FIRSTPASS
+--CTUSize=64  --MinQTISlice=4 --MinQTNonISlice=4 --MinQTChromaISliceInChromaSamples=2 --MaxMTTDepth=0 --MaxMTTDepthISliceL=1 --MaxMTTDepthISliceC=1 # FAST
+--CTUSize=128 --MinQTISlice=8 --MinQTNonISlice=8 --MinQTChromaISliceInChromaSamples=4 --MaxMTTDepth=1 --MaxMTTDepthISliceL=2 --MaxMTTDepthISliceC=2 # MEDIUM
+--CTUSize=128 --MinQTISlice=8 --MinQTNonISlice=8 --MinQTChromaISliceInChromaSamples=4 --MaxMTTDepth=2 --MaxMTTDepthISliceL=3 --MaxMTTDepthISliceC=3 # SLOW
+--CTUSize=128 --MinQTISlice=8 --MinQTNonISlice=8 --MinQTChromaISliceInChromaSamples=4 --MaxMTTDepth=3 --MaxMTTDepthISliceL=3 --MaxMTTDepthISliceC=3 # SLOWER, FASTER
+
+--DepQuant=0 --RDOQ=0 --SignHideFlag=0 # DepQuant=0 => RDOQ=0,1,2 SignHideFlag=0,1
+--DepQuant=0 --RDOQ=0 --SignHideFlag=1
+--DepQuant=0 --RDOQ=1 --SignHideFlag=0
+--DepQuant=0 --RDOQ=1 --SignHideFlag=1
+--DepQuant=0 --RDOQ=2 --SignHideFlag=0
+--DepQuant=0 --RDOQ=2 --SignHideFlag=1 #*
+--DepQuant=1 --RDOQ=1 --SignHideFlag=0 # DepQuant=1 => RDOQ=1,2 SignHideFlag=0
+--DepQuant=1 --RDOQ=2 --SignHideFlag=0
+
+--TransformSkip=0 --BDPCM=0      # TransformSkip=0 => BDPCM=0
+--TransformSkip=1 --BDPCM=0
+--TransformSkip=1 --BDPCM=1
+--TransformSkip=2 --BDPCM=0
+--TransformSkip=2 --BDPCM=1      #*
+
+--DMVR=0
+--DMVR=1                #*
+--LMChroma=0
+--LMChroma=1            #*
+
+--MTS=0 --MTSImplicit=0
+--MTS=0 --MTSImplicit=1 #*
+--MTS=1 --MTSImplicit=0 # MTSIntra
+--MTS=2 --MTSImplicit=0
+
+# Low-Frequency Non-Separable Transform (intra only)
+--LFNST=0               #* also connected with MTS
+--LFNST=1
+--LFNST=2
+--LFNST=3
+
+--SAO=0
+--SAO=1                 #*
+
+--TMVPMode=0
+--TMVPMode=1            #*
+--TMVPMode=2
+
+--ALF=0 --CCALF=0 --UseNonLinearAlfLuma=0 --UseNonLinearAlfChroma=0 #*  ALF=0         
+--ALF=1 --CCALF=0 --UseNonLinearAlfLuma=0 --UseNonLinearAlfChroma=0
+--ALF=1 --CCALF=0 --UseNonLinearAlfLuma=1 --UseNonLinearAlfChroma=0 #   ALF=1 CCALF=0
+--ALF=1 --CCALF=0 --UseNonLinearAlfLuma=0 --UseNonLinearAlfChroma=1
+--ALF=1 --CCALF=0 --UseNonLinearAlfLuma=1 --UseNonLinearAlfChroma=1
+--ALF=1 --CCALF=1 --UseNonLinearAlfLuma=0 --UseNonLinearAlfChroma=0 #   ALF=1 CCALF=0
+--ALF=1 --CCALF=1 --UseNonLinearAlfLuma=1 --UseNonLinearAlfChroma=0
+--ALF=1 --CCALF=1 --UseNonLinearAlfLuma=0 --UseNonLinearAlfChroma=1
+--ALF=1 --CCALF=1 --UseNonLinearAlfLuma=1 --UseNonLinearAlfChroma=1
+
+# GOP based temporal filter. (0:off, 1:filter all but the first and last frame, 2:filter all frames)
+--MCTF=0 --MCTFFutureReference=0    #*
+--MCTF=1 --MCTFFutureReference=0
+--MCTF=1 --MCTFFutureReference=1
+--MCTF=2 --MCTFFutureReference=0
+--MCTF=2 --MCTFFutureReference=1
+
+# Affine prediction + predict type (Affine) + Prediction Refinement with Optical Flow (Affine)
+--Affine=0 --AffineType=0 --PROF=0  # *
+--Affine=1 --AffineType=0 --PROF=0
+--Affine=1 --AffineType=1 --PROF=0
+--Affine=1 --AffineType=0 --PROF=1
+--Affine=1 --AffineType=1 --PROF=1
+--Affine=2 --AffineType=1 --PROF=1  # Affine=2 => Affine=1 + PROF=1 + AffineType=1
+
+# Subblock Temporal Motion Vector Prediction
+--SbTMVP=0 # ??? require Affine > 0 ???
+--SbTMVP=1 # ??? confirmParameter(m_maxNumAffineMergeCand < (m_SbTMVP ? 1 : 0), "MaxNumAffineMergeCand must be greater than 0 when SbTMVP is enabled");
+
+# Merge Mode with Motion Vector Difference (+ adptive use of fractional MVD in MMVD)
+--MMVD=0 --AllowDisFracMMVD=0       # *
+--MMVD=1 --AllowDisFracMMVD=0
+--MMVD=1 --AllowDisFracMMVD=1
+--MMVD=2 --AllowDisFracMMVD=0
+--MMVD=2 --AllowDisFracMMVD=1
+--MMVD=3 --AllowDisFracMMVD=0
+--MMVD=3 --AllowDisFracMMVD=1
+--MMVD=4 --AllowDisFracMMVD=0
+--MMVD=4 --AllowDisFracMMVD=1
+
+# Enable Bi-Directional Optical Flow
+--BDOF=0                #*
+--BDOF=1
+
+# Encoder optimization with deblocking filter 0:off 1:vtm 2:fast
+--EDO=0                 #*
+--EDO=1
+--EDO=2
+
+# Geometric partitioning mode
+--Geo=0                 #*
+--Geo=1
+--Geo=2
+--Geo=3
+
+# Enable Adaptive MV precision Mode (IMV)
+--AMVR=0                #*
+--AMVR=1
+--AMVR=2
+--AMVR=3
+--AMVR=4
+--AMVR=5
+--AMVR=6
+--AMVR=7
+
+# Joint coding of chroma residuals 
+--JointCbCr=0           #*
+--JointCbCr=1
+
+# Luma Mapping with Chroma Scaling
+--LMCS=0                #*
+--LMCS=1
+
+# Matrix-based Intra Prediction
+--MIP=0 --FastMIP=0     #*
+--MIP=1 --FastMIP=0
+--MIP=1 --FastMIP=1
+--MIP=1 --FastMIP=2
+--MIP=1 --FastMIP=3
+--MIP=1 --FastMIP=4
+
+# Multiple Refernce Lines Prediction
+--MRL=0                 #*
+--MRL=1
+
+# Symmetric MVD (0:off 1:vtm 2:fast 3:faster)
+--SMVD=0    #*
+--SMVD=1
+--SMVD=2
+--SMVD=3
+
+# Combined Intra/Inter Prediction
+--CIIP=0    #*
+--CIIP=1
+--CIIP=2
+--CIIP=3
+
+# Intra Sub-Partitions Mode (0: off, 1: vtm, 2: fast, 3: faster)
+--ISP=0     #*
+--ISP=1
+--ISP=2
+--ISP=3
+
+# Sub-Block Transform for inter blocks (0: off 1: vtm, 2: fast, 3: faster)
+--SBT=0     #*
+--SBT=1
+--SBT=2
+--SBT=3
+
+# Signal based QTBT speed-up
+--ContentBasedFastQtbt=0
+--ContentBasedFastQtbt=1    #*
+
+# Serach mode (0:Full search 1:Diamond 2:Selective 3:Enhanced Diamond 4:Fast Diamond)
+# --FastSearch=0 # too slow
+--FastSearch=1
+--FastSearch=2
+--FastSearch=3
+--FastSearch=4              #*
+
+# Non-VTM compatible QTBTT speed-ups
+--QtbttExtraFast=0
+--QtbttExtraFast=1          #*
+
+
+# Fast methods for inter merge
+--FastMrg=0
+--FastMrg=1
+--FastMrg=2                 #*
+
+# Enable fast sub-pel ME
+--FastSubPel=0
+--FastSubPel=1              #*

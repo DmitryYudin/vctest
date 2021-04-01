@@ -1,0 +1,47 @@
+-preset superfast  # superfast, veryfast, fast, medium, slow, veryslow and placebo
+-preset veryfast
+-preset fast
+-preset medium
+#-preset slow
+#-preset veryslow
+#-preset placebo
+
+-do64 0     # default true, false: closing 64x64 for videos<=720
+-do64 1
+-me 0       # ME: 0: DIA, 1: HEX, 2: UMH, 3:EPZS, 4: CROSS
+-me 1
+-me 2
+-me 3
+-me 4
+
+-subme 0    # 0 :disable 1: fast, 2: square full
+-subme 1
+-subme 2
+
+-merange 32 # SearchRange,-merange: search range
+-merange 64
+-merange 128
+-merange 256
+
+-intertu 0  # enable inter tu decision,1: FAST MODE 0: only 4 sub tus
+-intertu 1
+
+-ts 0       # enable transform skip, 0(default):disabled, 1: enable
+-ts 1
+-part 0     # inter partitioning: 0: only inter 2Nx2N, 1: check 2NxN/Nx2N/NxN
+-part 1
+
+-df 0       # enable deblocking filter
+-df 1
+
+-sao 0      # 0: OFF, 1: sao super fast, 2: sao very fast, 3: sao fast, 4: sao BO, EO0, EO1
+-sao 1
+-sao 2
+-sao 3
+-sao 4
+
+-sis 0      # enable Strong Intra Smoothing
+-sis 1
+
+-rdoq 0     # enable rdoq
+-rdoq 1
