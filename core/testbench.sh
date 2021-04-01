@@ -230,7 +230,7 @@ entrypoint()
 	progress_begin "[3/5] Decoding..." "$decodeList"
 	if [[ -n "$decodeList" ]]; then
 		for outputDirRel in $decodeList; do
-			echo "$self -- decode_single_file $outputDirRel"
+			echo "$self -- decode_single_file $transport $outputDirRel"
 		done > $testplan
 		execute_plan $testplan $dirTmp $NCPU
 	fi
@@ -409,28 +409,6 @@ execute_plan()
     local dirTmp=$1; shift
 	local ncpu=$1; shift
 	$dirScript/rpte2.sh $testplan -p $dirTmp -j $ncpu
-}
-
-PERF_ID=
-start_cpu_monitor()
-{
-	local encExe=$1; shift
-	local name=${encExe##*/}; name=${name%.*}
-
-	local cpu_monitor_type=posix; case ${OS:-} in *_NT) cpu_monitor_type=windows; esac
-	if [[ $cpu_monitor_type == windows ]]; then
-		typeperf '\Process('$name')\% Processor Time' &
-		PERF_ID=$!
-	else
-		# TODO: posix compatible monitor
-		:
-	fi
-}
-stop_cpu_monitor()
-{
-	[[ -z $PERF_ID ]] && return 0
-	{ kill -s INT $PERF_ID && wait $PERF_ID; } || true 
-	PERF_ID=
 }
 
 PROGRESS_STAGE_TOTAL=
@@ -643,19 +621,21 @@ encode_single_file()
 	dict_getValue "$info" dst; dst=$REPLY
 	dict_getValue "$info" srcNumFr; srcNumFr=$REPLY
 
+    local remoteExe= remoteSrc=
 	if [[ $transport == local ]]; then
-        encExe=$DIR_BIN/$encExe
-        src=$DIR_VEC/$src
+        remoteExe=$DIR_BIN/$encExe
+        remoteSrc=$DIR_VEC/$src
 	elif [[ $transport == adb || $transport == ssh ]]; then
 		local remoteDirBin= remoteDirVec=
 		TARGET_getExecDir; remoteDirBin=$REPLY/vctest/bin
 		TARGET_getDataDir; remoteDirVec=$REPLY/vctest/vectors
-		encExe=$remoteDirBin/$encExe
-		src=$remoteDirVec/$src
+		remoteExe=$remoteDirBin/$encExe
+		remoteSrc=$remoteDirVec/$src
     else
         error_exit "encoding with transport=$transport not implemented" >&2
 	fi
-	codec_cmdSrc $codecId $src; encCmdSrc=$REPLY
+
+	codec_cmdSrc $codecId $remoteSrc; encCmdSrc=$REPLY
 	codec_cmdDst $codecId $dst; encCmdDst=$REPLY
 
 	# temporary hack, for backward compatibility (remove later)
@@ -663,40 +643,26 @@ encode_single_file()
 
 	local args="$encCmdArgs $encCmdSrc $encCmdDst"
 	echo "$args" > input_args # memorize
-	echo "$encExe" > input_exe # memorize
+	echo "$remoteExe" > input_exe # memorize
+
+    # Make estimates only if one instance of the encoder is running at a time
+    local estimate_execution_time=0
+    if [[ $target == windows && $NCPU == 1 ]]; then
+        estimate_execution_time=1
+    fi
+
+    export codecId=$codecId
+    export encoderExe=$remoteExe
+    export encoderArgs=$args
+    export bitstreamFile=$dst
+    export monitorCpu=$estimate_execution_time
 
 	if [[ $transport == local ]]; then
-		# temporary hack, for backward compatibility (remove later)
-		[[ $codecId == h265demo ]] && echo "" > h265demo.cfg
 
-		# Make estimates only if one instance of the encoder is running at a time
-		local estimate_execution_time=false
-		if [[ $target == windows && $NCPU == 1 ]]; then
-			estimate_execution_time=true
-		fi
+        . $dirScript/executor.sh
 
-		if $estimate_execution_time; then
-			# Start CPU monitor
-			trap 'stop_cpu_monitor 1>/dev/null 2>&1' EXIT
-			start_cpu_monitor $encExe > encoded_cpu
-		fi
+        executor encode
 
-		# Encode
-		local consumedSec=$(date +%s)
-		if ! { echo "yes" | $encExe $args; } 1>encoded_log 2>&1 || [ ! -f $dst ]; then
-			echo "" # newline if stderr==tty
-			cat encoded_log >&2
-			error_exit "encoding error, see logs above"
-		fi
-		consumedSec=$(( $(date +%s) - consumedSec ))
-
-		if $estimate_execution_time; then
-			echo $consumedSec > encoded_sec
-
-			# Stop CPU monitor
-			stop_cpu_monitor
-			trap - EXIT
-		fi
 	elif [[ $transport == adb || $transport == ssh ]]; then
 		local remoteDirOut remoteOutputDir
 		TARGET_getDataDir; remoteDirOut=$REPLY/vctest/out
@@ -721,10 +687,10 @@ encode_single_file()
 
 			consumedSec=\$(date +%s)
             if [[ $ENABLE_CPU_MONITOR == 1 ]]; then # run decoder in background
-			    $encExe $args </dev/null 1>encoded_log 2>&1 &
+			    $remoteExe $args </dev/null 1>encoded_log 2>&1 &
                 pid=\$!
             else
-			    $encExe $args </dev/null 1>encoded_log 2>&1
+			    $remoteExe $args </dev/null 1>encoded_log 2>&1
             fi
 			error_code=0
             if [[ $ENABLE_CPU_MONITOR == 1 ]]; then
@@ -746,16 +712,18 @@ encode_single_file()
 		"
 		TARGET_pull $remoteOutputDir/. .
 		TARGET_exec "rm -rf $remoteOutputDir"
+
+		date "+%Y.%m.%d-%H.%M.%S" > encoded.ts
     else
         error_exit "encoding with transport=$transport not implemented" >&2
 	fi
-	date "+%Y.%m.%d-%H.%M.%S" > encoded.ts
 
 	popd
 }
 
 decode_single_file()
 {
+	local transport=$1; shift
 	local outputDirRel=$1; shift
 	local outputDir=$DIR_OUT/$outputDirRel
 	pushd $outputDir
@@ -770,47 +738,19 @@ decode_single_file()
 	dict_getValue "$info" encFmt; encFmt=$REPLY
 	dict_getValue "$info" srcRes; srcRes=$REPLY
 
-	local recon=$(basename $dst).yuv
+    local remoteSrc=$DIR_VEC/$src
 
-	stat -c %s $dst > decoded_bitstream_size
+    export originalYUV=$remoteSrc
+    export bitstreamFile=$dst
+    export bitstreamFmt=$encFmt
+    export resolutionWxH=$srcRes
+    export TRACE_HM=$TRACE_HM
 
-	local decoderId=
-	case $encFmt in
-		h264|h265|vp8|vp9) decoderId=ffmpeg;;
-		h266) decoderId=vvdec;;
-		*) error_exit "can't find decoder for '$encFmt' format";;
-	esac
+    . $dirScript/executor.sh
 
-	if [[ $decoderId == ffmpeg ]]; then
-		ffmpeg -y -loglevel error -i $dst $recon
+    executor decode
 
-		ffprobe -v error -show_frames -i $dst | tr -d $'\r' > decoded_ffprobe
-
-	elif [[ $decoderId == vvdec ]]; then
-        vvdecapp -b $dst -o $recon > decoded_vvdec
-    fi
-
-	# ffmpeg does not accept filename in C:/... format as a filter option
-    local log
-	if ! log=$(ffmpeg -hide_banner -s $srcRes -i $DIR_VEC/$src -s $srcRes -i $recon -lavfi "ssim=decoded_ssim;[0:v][1:v]psnr=decoded_psnr" -f null - ); then
-		echo "$log" && return 1
-	fi
-
-	case $encFmt in
-		h265)
-            if [[ "$TRACE_HM" == 1 ]]; then
-    			# hard-coded log filename: 'TraceDec.txt'
-	    		TAppDecoder -b $dst > /dev/null
-                mv TraceDec.txt decoded_trace_hm
-            fi
-		;;
-	esac
-
-	rm -f $recon
-
-	date "+%Y.%m.%d-%H.%M.%S" > decoded.ts
-
-	popd
+    popd
 }
 
 parse_single_file()
