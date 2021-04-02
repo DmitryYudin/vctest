@@ -602,15 +602,21 @@ jobsRunTasks()
 	done
 	[[ $__jobsRunning -lt $runMax ]] && __jobsNoMoreTasks=1
 
+    forgetWorkerPid() {
+		local pid=$1; shift            
+		set -- $__jobsPid; # remove from wait list
+    	for REPLY; do shift; if [[ $REPLY != $pid ]]; then set -- "$@" $REPLY; fi; done
+		__jobsPid="$@"
+    }
+
 	setWorkerGone() {
 		local pid=$1 x=; shift
 		debug_log master "setWorkerGone pid=$pid [start waiting pid]"
 
 		{ wait $pid || true; } 2>/dev/null  # may have already gone
 
-		set -- $__jobsPid; # remove from wait list
-		for x; do shift; if [[ $x != $pid ]]; then set -- "$@" $x; fi; done
-		__jobsPid="$@"
+        forgetWorkerPid $pid
+
 		__jobsRunning=$((__jobsRunning - 1))		# worker exit
 
 		debug_log master "setWorkerGone pid=$pid [onchain $__jobsPid]"
