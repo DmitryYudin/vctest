@@ -8,6 +8,7 @@ set -eu -o pipefail
 dirScript=$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 . "$dirScript/message_q.sh"
 . "$dirScript/progress_bar.sh"
+. "$dirScript/utility_functions.sh"
 
 ENABLE_NAMED_PIPE=${ENABLE_NAMED_PIPE:-1}
 
@@ -271,21 +272,26 @@ jobsReportTaskFail()
 	local status=$1; shift
 	local cmd=$1; shift
 
+    # Do not report on interrupt
+    [[ $__jobsInterruptCnt -gt 0 ]] && return
+
+    # Do not report multiple times
+	[[ $__jobsErrorCnt -gt 1 && $__jobsLogLevel -le 1 ]] && return
+
 	local CSI=$'\033[' RESET= CLR_R=
 	[[ -t 1 ]] && { CLR_R=${CSI}0K; RESET=${CSI}m; }
-	echo "" # push progressbar
+    echo "" # push progressbar
 	echo "${CLR_R}Fail:$id:$status:$cmd${RESET}"
-	if [[ $__jobsErrorCnt -eq 1 || $__jobsLogLevel -gt 1 ]]; then
-		local color=yes BOLD= RED=
-		[[ -t 1 && "$color" == yes ]] && { BOLD=${CSI}1m; RED=${CSI}31m; }
-		echo -e "$BOLD<stdout:$id>"
-		cat "$tempPath/$id.stdout.log" || true
-		if [[ "$__jobsStderrToStdout" == 0 ]]; then
-			echo -e "$BOLD$RED<stderr:$id>"
-			cat "$tempPath/$id.stderr.log" || true
-		fi
-		echo -e "$RESET"
+
+	local color=yes BOLD= RED=
+	[[ -t 1 && "$color" == yes ]] && { BOLD=${CSI}1m; RED=${CSI}31m; }
+	echo -e "$BOLD<stdout:$id>"
+	cat "$tempPath/$id.stdout.log" || true
+	if [[ "$__jobsStderrToStdout" == 0 ]]; then
+		echo -e "$BOLD$RED<stderr:$id>"
+		cat "$tempPath/$id.stderr.log" || true
 	fi
+	echo -e "$RESET"
 }
 
 tempPath=.
@@ -407,43 +413,89 @@ jobsRunTasks()
 	#
 	# Multi-threaded
 	#
+    get_second_children() {
+        get_children_bfs
+        local children=${REPLY//:/ } pid
+        set --
+        for pid in $children; do
+            local jobPid found=
+            for jobPid in $__jobsPid $__jobsPingPid; do
+                [[ $jobPid == $pid ]] && found=1 && break
+            done
+            [[ -n $found ]] && continue
+            set -- "$@" $pid
+        done
+        REPLY="$@"
+    }
+
+    kill_children() {
+        local stage=$1; shift
+        case $stage in
+            1)
+                get_second_children; set -- $REPLY
+                debug_log_master "X KILL children #$#: $*"
+                PB_set_message "KILL children #$#"
+                PB_report_progress
+                if [[ $# -gt 0 ]]; then
+                    { kill -s KILL "$@" || true; } 2>/dev/null
+                fi
+            ;;
+            2)
+                get_second_children; set -- $REPLY
+                debug_log_master "X TERM children #$#: $*"
+                PB_set_message "TERM children #$#"
+                PB_report_progress
+                if [[ $# -gt 0 ]]; then
+                    { kill -s TERM "$@" || true; } 2>/dev/null
+                    { wait "$@" || true; } 2>/dev/null
+                fi
+            ;;
+            3)        
+                set -- $__jobsPid
+                debug_log_master "X KILL workers #$#: $*"
+                PB_set_message "KILL workers #$#"
+                PB_report_progress
+                if [[ $# -gt 0 ]]; then
+                    { kill -s KILL "$@" || true; } 2>/dev/null
+                fi
+            ;;
+            *)
+                get_children_bfs; set -- $REPLY
+                debug_log_master "X TERM everything #$#: $*"
+                PB_set_message "TERM everything #$#"
+                PB_report_progress
+                if [[ $# -gt 0 ]]; then
+                    { kill -s TERM "$@" || true; } 2>/dev/null
+                    { wait "$@" || true; } 2>/dev/null
+                    __jobsPid=
+                    __jobsPingPid=
+                fi
+            ;;
+        esac
+    }
+
 	jobsOnINT() {
 		# most likely stderr is redirected to /dev/null at this moment
 		__jobsInterruptCnt=$(( __jobsInterruptCnt + 1 ))
         PB_increase_interrupts
 
-		# unblock everything
-        MQ_master_destroy
+        if [[ $__jobsInterruptCnt -le 3 ]]; then
+            kill_children $__jobsInterruptCnt
+            return 0
+        fi
 
-		if [[ -n "$__jobsPingPid" ]]; then
-			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 2>/dev/null
-			__jobsPingPid=
-		fi
-		if [[ -n "$__jobsPid" ]]; then
-			{ kill -s KILL $__jobsPid && wait $__jobsPid || true; } 2>/dev/null
-			__jobsPid=
-		fi
-#		[[ $__jobsInterruptCnt -ge 3 ]] && exit 127
+        kill_children 4
+
 		exit 127
-
-		return 0
 	}
 	jobsOnEXIT() {
 
 		exec 4<&- # hard-coded fd
 
+		# unblock everything
         MQ_master_destroy
 
-		if [[ -n "$__jobsPingPid" ]]; then
-			{ kill -s TERM $__jobsPingPid && wait $__jobsPingPid || true; } 1>/dev/null  2>/dev/null
-		fi
-		if [[ -n "$__jobsPid" ]]; then
-			debug_log_master "waiting for unfinished jobs: $__jobsPid"
-			{ kill -s TERM $__jobsPid && wait $__jobsPid || true; } >/dev/null
-		fi
-
-		# due to previous 'rm' the worker may create file with a pipe name on status report
-        MQ_master_destroy
+        kill_children 404
 
 		{ PB_report_progress; echo ""; }
 

@@ -362,3 +362,41 @@ human_readable_bytes()
 	[[ $len == 0 ]] && sz="?.?"
 	REPLY="$sz$suff"
 }
+
+get_children_bfs() # pid=$BASHPID -> pid pid ... : pid pid ... : pid ...
+{                  #                 level-3       level-2       level-1
+#   local PID=$1; shift
+    local PID=$BASHPID
+    local RESULT=
+
+    get_group() { # pid:ppid pid:ppid ...
+        local PGID=$(cat /proc/self/stat | sed 's/(.*)/()/' | awk '{ print $5 }' || true    )
+
+        # Here is at leas two temporary processes: sed and awk
+        REPLY=$(cd /proc >/dev/null
+                cat [1-9]*/stat 2>/dev/null | sed 's/(.*)/()/' | awk -v PGID=$PGID '{ if ( PGID == $5 ) { print $1":"$4 } }'; # pid:ppid
+                cd - >/dev/null
+        )
+    }
+    get_children_bfs_RECUR() {
+        local PID=$1 group=$2
+        # collect direct children into $@
+        set --
+        for gr in $group; do
+            local pid=${gr%:*} ppid=${gr#*:}
+            [[ $ppid != $PID ]] || set -- "$@" $pid
+        done
+        [[ $# == 0 ]] || RESULT="$RESULT : $@"
+        # traverse direct children in $@
+        for PID; do get_children_bfs_RECUR $PID "$group"; done
+    }
+    local group pid
+    get_group; group=$REPLY
+    get_children_bfs_RECUR $PID "$group"
+    REPLY=${RESULT# : } # remove first delimiter if any
+    
+    # reverse list
+    set --
+    for pid in $REPLY; do set -- $pid "$@"; done
+    REPLY="$@"
+}
