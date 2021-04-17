@@ -228,6 +228,34 @@ EOT
     esac
 }
 
+#
+# On windows each subshell access is extrimely expensive
+# Here is a simple cache to backup and reuse the result:
+# ( assume 'keys' and 'values' are simple, non-empty variables )
+#
+# init:         MY_keys=
+#               MY_vals=
+# get+check:    MAP_get $key "$MY_keys" "$MY_vals"; val=$REPY
+# set           if [[ -z $val ]]; then
+#                   val=$( some function )
+#                   MY_keys="$MY_keys $key"
+#                   MY_vals="$MY_vals $val"
+#               fi
+MAP_get()
+{
+    local key=$1; shift
+    local keys=$1; shift
+    local values=$1; shift
+    local knownKey
+    set -- $values
+    for knownKey in $keys; do
+        [[ $knownKey == $key ]] && break
+        shift
+    done
+    [[ $# != 0 ]] && REPLY=$1 && return
+    REPLY=
+}
+
 detect_resolution_string()
 {	
 	local filename=$1; shift
@@ -304,51 +332,70 @@ detect_resolution_string()
 	[[ -z "$res" ]] && error_exit "can't detect resolution $filename"
 }
 
+DFS_keys=
+DFS_vals=
 detect_framerate_string()
 {	
 	local filename=$1; shift
 	local name=${filename//\\/}; name=${name##*[/\\]}; name=${name%%.*}
 
 	name=${name//FPS/fps}
+#   MAP_get $name "$DFS_keys" "$DFS_vals"
+#   [[ -n $REPLY ]] && return
+
     REPLY=
 	# Try XXX pattern delimited by "." or "_"
     # 1. consider numbers in a range [1;999] with 'fps' suffix
 	for delim in _ .; do
 		local IFS=$delim
 		for i in $name; do # avoid regexp to make code busybox friendly
-            case $i in [1-9]fps|[1-9][0-9]fps|[1-9][0-9][0-9]fps) REPLY=${i%fps} && return; esac
+            case $i in [1-9]fps|[1-9][0-9]fps|[1-9][0-9][0-9]fps) REPLY=${i%fps} && break; esac
 		done
+        [[ -z $REPLY ]] || break
 	done
     # 2. consider numbers in a range [1;99]
 	for delim in _ .; do
 		local IFS=$delim
 		for i in $name; do
-            case $i in [1-9]|[1-9][0-9]) REPLY=$i && return; esac
+            case $i in [1-9]|[1-9][0-9]) REPLY=$i && break; esac
 		done
+        [[ -z $REPLY ]] || break
 	done
     # 3. set to default
-    REPLY=30
+    [[ -n $REPLY ]] || REPLY=30    
+
+#   DFS_keys="$DFS_keys $name"
+#   DFS_vals="$DFS_vals $REPLY"
 }
 
+DFN_keys=
+DFN_vals=
 detect_frame_num()
 {
 	local filename=$1; shift
-	local res=${1:-};
+	local res=${1:-}
+
+    MAP_get $filename "$DFN_keys" "$DFN_vals"
+    [[ -n $REPLY ]] && return
+
 	if [[ -z "$res" ]]; then
 		detect_resolution_string "$filename" && res=$REPLY
 	fi
-	[[ -z "$res" ]] && return
-
-	local numBytes=$(stat -c %s "$filename")
-	[[ -z "$numBytes" ]] && return 1
-
+	[[ -z "$res" ]] && return 1
 	local width=${res%%x*}
 	local height=${res##*x}
+
+    local numBytes=
+   	numBytes=$(stat -c %s "$filename")
+    [[ -z "$numBytes" ]] && return 1
+
 	local numFrames=$(( 2 * numBytes / width / height / 3 )) 
 	local numBytes2=$(( 3 * numFrames * width * height / 2 ))
 	[[ $numBytes != $numBytes2 ]] && error_exit "can't detect frames number $filename"
-
 	REPLY=$numFrames
+
+    DFN_keys="$DFN_keys $filename"
+    DFN_vals="$DFN_vals $REPLY"
 }
 
 human_readable_bytes()

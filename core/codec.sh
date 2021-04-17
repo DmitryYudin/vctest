@@ -113,6 +113,9 @@ codec_fmt()
 	esac
 	REPLY=$fmt
 }
+
+CODECEXE_keys=
+CODECEXE_vals=
 codec_exe()
 {
 	local codecId=$1; shift
@@ -120,10 +123,8 @@ codec_exe()
     local do_not_exit=${1:-}
 	local encExe=
 
-	eval "local cachedVal=\${CACHE_path_${codecId}_${target}:-}"
-	if [[ -n "$cachedVal" ]]; then
-		encExe=$cachedVal
-	else
+    MAP_get $codecId$target "$CODECEXE_keys" "$CODECEXE_vals"; encExe=$REPLY
+	if [[ -z "$encExe" ]]; then
         if [[ $(type -t exe_${codecId}) != "function" ]]; then
             [[ -n $do_not_exit ]] && echo "warning: no executable associated with '$codecId' codecId." >&2 && return 1
             error_exit "no executable associated with '$codecId' codecId."
@@ -137,26 +138,29 @@ codec_exe()
             [[ -n $do_not_exit ]] && echo "warning: can't find '$DIR_BIN/$encExe'" && return 1
             error_exit "can't find '$DIR_BIN/$encExe'"
         fi
-		eval "CACHE_path_${codecId}_${target}=$encExe"
+        CODECEXE_keys="$CODECEXE_keys $codecId$target"
+        CODECEXE_vals="$CODECEXE_vals $encExe"
 	fi
 	REPLY=$encExe
 }
+
+CODECHASH_keys=
+CODECHASH_vals=
 codec_hash()
 {
 	local codecId=$1; shift
 	local target=$1; shift
 	local hash=
 
-	eval "local cachedVal=\${CACHE_hash_${codecId}:-}"
-	if [[ -n "$cachedVal" ]]; then
-		hash=$cachedVal
-	else
+    MAP_get $codecId$target "$CODECHASH_keys" "$CODECHASH_vals"; hash=$REPLY
+	if [[ -z "$hash" ]]; then
 		local encExe
 		codec_exe $codecId $target; encExe=$REPLY
 		hash=$(md5sum "$DIR_BIN/$encExe")
 		hash=${hash% *}
 		hash=${codecId}_${hash::8}
-		eval "CACHE_hash_${codecId}=$hash"
+        CODECHASH_keys="$CODECHASH_keys $codecId$target"
+        CODECHASH_vals="$CODECHASH_vals $hash"
 	fi
 	REPLY=$hash
 }
