@@ -73,6 +73,7 @@ usage()
 	       --parse       Force parse stage
 	       --trace_hm    Collect H.265 stream info from HW decoder trace
 	       --nomon       Disable CPU monitor
+	       --timeline    Do not run test, but print out encoding and decoding execution timestamps available for each test
 	EOF
 }
 
@@ -90,7 +91,7 @@ entrypoint()
 
     local timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
 	local endofflags=
-	local force= parse= decode= bdrate=
+	local force= parse= decode= bdrate= timeline=
 	while [[ $# -gt 0 ]]; do
 		local nargs=2
 		case $1 in
@@ -113,6 +114,7 @@ entrypoint()
                --parse)     parse=1; nargs=1;;
                --trace_hm)  TRACE_HM=1; nargs=1;;
                --nomon)     ENABLE_CPU_MONITOR=; nargs=1;;
+               --timeline)  timeline=1; nargs=1;;
 			   --)			endofflags=1; nargs=1;;
 			*) error_exit "unrecognized option '$1'"
 		esac
@@ -167,6 +169,11 @@ entrypoint()
     [[ -n $bdrate ]] && num_stages=$((num_stages+1))
     progress_init $num_stages
 
+    local timelineFile=timeline_$timestamp.txt
+    if [[ -n $timeline ]]; then
+        echo "Timeline file: $timelineFile"
+        printf "%-19s %-10s %-10s %-19s %-10s %-10s LOCATION SRC ARGS\n" encoded start_sec end_sec decoded start_sec end_sec >> $timelineFile
+    fi
 	#
 	# Scheduling
 	#
@@ -183,6 +190,26 @@ entrypoint()
         dict_getValue "$info" encFmt; encFmt=$REPLY
 		local outputDirRel=$encExeHash/$encCmdHash
 		local outputDir=$DIR_OUT/$outputDirRel
+
+        if [[ -n $timeline ]]; then
+            local stage src encCmdArgs
+        	dict_getValue "$info" src; src=$REPLY
+        	dict_getValueEOL "$info" encCmdArgs; encCmdArgs=$REPLY
+            REPLY=
+            for stage in encoded decoded; do
+                local ts=- ts_begin=- ts_end=-
+                if [[ -f $outputDir/$stage.ts ]]; then
+                    { read -r ts; } < $outputDir/${stage}.ts
+                    { read -r ts_begin; } < $outputDir/${stage}_ts_begin
+                    { read -r ts_end; } < $outputDir/${stage}_ts_end
+                fi
+                REPLY="$REPLY $ts $ts_begin $ts_end"
+            done
+            printf "%19s %10s %10s %19s %10s %10s $outputDirRel $src $encCmdArgs\n" $REPLY >> $timelineFile
+
+    		progress_next $outputDirRel
+            continue
+        fi
 
 		local do_encode= do_decode= do_parse=
 
@@ -222,6 +249,14 @@ entrypoint()
 	done < $optionsFile
 	rm -f $optionsFile
 	progress_end
+
+
+    if [[ -n $timeline ]]; then
+        for REPLY; do
+            echo "$REPLY"
+        done
+        return 0
+    fi
 
 	local self
 	relative_path "$0"; self=$REPLY # just to make output look nicely
