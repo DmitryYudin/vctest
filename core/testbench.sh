@@ -435,7 +435,8 @@ stop_cpu_monitor()
 
 PROGRESS_STAGE_TOTAL=
 PROGRESS_STAGE_IDX=
-PROGRESS_SEC=
+PROGRESS_START_SEC=
+PROGRESS_PREV_SEC=
 PROGRESS_HDR=
 PROGRESS_INFO=
 PROGRESS_CNT_TOT=0
@@ -449,7 +450,8 @@ progress_begin()
 {
 	local name="[$PROGRESS_STAGE_IDX/$PROGRESS_STAGE_TOTAL] $1"; shift
 	local str=
-	PROGRESS_SEC=$SECONDS
+	PROGRESS_START_SEC=$SECONDS
+    PROGRESS_PREV_SEC=$PROGRESS_START_SEC
 	PROGRESS_HDR=
 	PROGRESS_INFO=
 	PROGRESS_CNT_TOT=1
@@ -472,14 +474,16 @@ progress_next()
 	local outputDirRel=$1; shift
 	local outputDir=$DIR_OUT/$outputDirRel info=
 
+	PROGRESS_CNT=$(( PROGRESS_CNT + 1 ))
+
+    [[ $PROGRESS_CNT != $PROGRESS_CNT_TOT && $(( SECONDS - PROGRESS_PREV_SEC )) -lt 1 ]] && return
+
     { read -r info; } < $outputDir/info.kw
 
 	if [[ -n "$PROGRESS_HDR" ]]; then
 		print_console "$PROGRESS_HDR\n"
 		PROGRESS_HDR=
 	fi
-
-	PROGRESS_CNT=$(( PROGRESS_CNT + 1 ))
 
 	local codecId= srcRes= srcFps= srcNumFr= QP= BR= PRESET= TH= SRC= HASH= ENC=
 	dict_getValue "$info" codecId  ; codecId=$REPLY
@@ -499,15 +503,17 @@ progress_next()
 	printf 	-v str "%s %9s %2s %-16s %-8s %s"    "$str" "$PRESET" "$TH" "$HASH" "$ENC" "$SRC"
 	PROGRESS_INFO=$str # backup
 
-	local duration=$(( SECONDS - PROGRESS_SEC ))
+	local duration=$(( SECONDS - PROGRESS_START_SEC ))
 	duration=$(date +%H:%M:%S -u -d @${duration})
 
 	print_console "$duration $PROGRESS_INFO\r"
+
+    PROGRESS_PREV_SEC=$SECONDS
 }
 progress_end()
 {
 	if [[ $PROGRESS_CNT != 0 ]]; then
-        local duration=$(( SECONDS - PROGRESS_SEC ))
+        local duration=$(( SECONDS - PROGRESS_START_SEC ))
         duration=$(date +%H:%M:%S -u -d @${duration})
 
         print_console "$duration $PROGRESS_INFO\n"
