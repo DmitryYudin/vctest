@@ -696,7 +696,7 @@ progress_next()
 		PROGRESS_HDR=
 	fi
 
-	local codecId= srcRes= srcFps= srcNumFr= QP= BR= PRESET= TH= SRC= HASH= ENC=
+	local codecId= srcRes= srcFps= srcNumFr= QP= BR= PRESET= TH= SRC= encCmdHash= encExeHash=
 	dict_getValue "$info" codecId  ; codecId=$REPLY
 	dict_getValue "$info" srcRes   ; srcRes=$REPLY
 	dict_getValue "$info" srcFps   ; srcFps=$REPLY
@@ -706,12 +706,12 @@ progress_next()
 	dict_getValue "$info" PRESET   ; PRESET=$REPLY
 	dict_getValue "$info" TH       ; TH=$REPLY
 	dict_getValue "$info" SRC      ; SRC=$REPLY
-	dict_getValue "$info" encCmdHash ; HASH=$REPLY ; HASH=${HASH::16}
-	dict_getValue "$info" encExeHash ; ENC=$REPLY  ; ENC=${ENC##*_}
+	dict_getValue "$info" encCmdHash ; encCmdHash=$REPLY; encCmdHash=${encCmdHash::16}
+	dict_getValue "$info" encExeHash ; encExeHash=$REPLY; encExeHash=${encExeHash##*_}
 
 	local str=
 	printf 	-v str "%4s %-11s %11s %5s %2s %6s" 	"$PROGRESS_CNT" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
-	printf 	-v str "%s %9s %2s %-16s %-8s %s"    "$str" "$PRESET" "$TH" "$HASH" "$ENC" "$SRC"
+	printf 	-v str "%s %9s %2s %-16s %-8s %s"    "$str" "$PRESET" "$TH" "$encCmdHash" "$encExeHash" "$SRC"
 	PROGRESS_INFO=$str # backup
 
 	local duration=$(( SECONDS - PROGRESS_START_SEC ))
@@ -781,7 +781,7 @@ output_report()
 	echo "$dict" >> $report_kw
 
 	local extFPS= intFPS= cpu= kbps= numI= avgI= avgP= peak= gPSNR= psnrI= psnrP= gSSIM=
-	local codecId= srcRes= srcFps= numFr= QP= BR= PRESET= TH= SRC= HASH= ENC=
+	local codecId= srcRes= srcFps= srcNumFr= QP= BR= PRESET= TH= SRC= encCmdHash= encExeHash=
 	local numIntra= numInter= numSkip=
 
 	dict_getValue "$dict" extFPS                ; extFPS=$REPLY
@@ -805,8 +805,8 @@ output_report()
 	dict_getValue "$dict" PRESET                ; PRESET=$REPLY
 	dict_getValue "$dict" TH                    ; TH=$REPLY
 	dict_getValue "$dict" SRC                   ; SRC=$REPLY
-	dict_getValue "$dict" encCmdHash            ; HASH=$REPLY; HASH=${HASH::16}
-	dict_getValue "$dict" encExeHash            ; ENC=$REPLY ; ENC=${ENC##*_}
+	dict_getValue "$dict" encCmdHash            ; encCmdHash=$REPLY; encCmdHash=${encCmdHash::16}
+	dict_getValue "$dict" encExeHash            ; encExeHash=$REPLY; encExeHash=${encExeHash##*_}
 	dict_getValue "$dict" numIntra   -  %5.1f   ; numIntra=$REPLY
 	dict_getValue "$dict" numInter   -  %5.1f   ; numInter=$REPLY
 	dict_getValue "$dict" numSkip    -  %5.1f   ; numSkip=$REPLY
@@ -816,7 +816,7 @@ output_report()
 	printf 	-v str "%s %3s %7s %6s %4s"         "$str" "$numI" "$avgI" "$avgP" "$peak"
 	printf 	-v str "%s %6s %6s %6s %6s"         "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
 	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
-	printf 	-v str "%s %9s %2s %-16s %-8s"      "$str" "$PRESET" "$TH" "$HASH" "$ENC"
+	printf 	-v str "%s %9s %2s %-16s %-8s"      "$str" "$PRESET" "$TH" "$encCmdHash" "$encExeHash"
 	printf 	-v str "%s %5s %5s %5s"             "$str" "$numIntra" "$numInter" "$numSkip"
 	printf 	-v str "%s %s"                      "$str" "$SRC"
 
