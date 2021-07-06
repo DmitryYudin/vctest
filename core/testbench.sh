@@ -452,10 +452,12 @@ entrypoint()
         echo "tst:$tag" >> $report
         output_header >> $report
 
+        output_report_begin
     	for outputDirRel in $reportList; do
     		progress_next $outputDirRel
 	    	report_single_file $report $report_kw $outputDirRel
         done
+        output_report_end $report
 
         report_idx=$((report_idx+1))
     done
@@ -737,10 +739,10 @@ output_header()
 {
 	local str=
 	printf 	-v str    "%6s %8s %5s %5s"                extFPS intFPS cpu% kbps
-	printf 	-v str "%s %3s %7s %6s %4s"         "$str" '#I' avg-I avg-P peak 
+	printf 	-v str "%s %4s %7s %6s %4s"         "$str" '#I' avg-I avg-P peak 
 	printf 	-v str "%s %6s %6s %6s %6s"         "$str" gPSNR psnr-I psnr-P gSSIM
 	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" codecId resolution '#frm' QP BR 
-	printf 	-v str "%s %9s %2s %-16s %-8s"      "$str" PRESET TH CMD-HASH ENC-HASH
+	printf 	-v str "%s %9s %3s %-16s %-8s"      "$str" PRESET TH CMD-HASH ENC-HASH
 	printf 	-v str "%s %5s %5s %5s"             "$str" I% P% Skip%
 	printf 	-v str "%s %s"                      "$str" SRC
 
@@ -772,7 +774,17 @@ output_legend()
 
 #	echo "$str" > /dev/tty
 }
-output_report()
+
+AVG_VARS="extFPS intFPS cpu kbps numI avgI avgP peak gPSNR psnrI psnrP gSSIM srcNumFr TH numIntra numInter numSkip"
+
+output_report_begin()
+{
+    for varName in $AVG_VARS; do
+        eval "CNT_$varName=0; SUM_$varName=0"
+    done
+}
+
+output_report_next()
 {
     local report=$1; shift
     local report_kw=$1; shift
@@ -813,13 +825,53 @@ output_report()
 
 	local str=
 	printf 	-v str    "%6s %8s %5s %5s"                "$extFPS" "$intFPS" "$cpu" "$kbps"
-	printf 	-v str "%s %3s %7s %6s %4s"         "$str" "$numI" "$avgI" "$avgP" "$peak"
+	printf 	-v str "%s %4s %7s %6s %4s"         "$str" "$numI" "$avgI" "$avgP" "$peak"
 	printf 	-v str "%s %6s %6s %6s %6s"         "$str" "$gPSNR" "$psnrI" "$psnrP" "$gSSIM"
 	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" "$codecId" "${srcRes}@${srcFps}" "$srcNumFr" "$QP" "$BR"
-	printf 	-v str "%s %9s %2s %-16s %-8s"      "$str" "$PRESET" "$TH" "$encCmdHash" "$encExeHash"
+	printf 	-v str "%s %9s %3s %-16s %-8s"      "$str" "$PRESET" "$TH" "$encCmdHash" "$encExeHash"
 	printf 	-v str "%s %5s %5s %5s"             "$str" "$numIntra" "$numInter" "$numSkip"
 	printf 	-v str "%s %s"                      "$str" "$SRC"
+	echo "$str" >> $report
 
+    for varName in $AVG_VARS; do
+        eval "if [[ -n \$$varName && \$$varName != '-' ]]; then CNT_$varName=\$((CNT_$varName + 1)); SUM_$varName=\"\$SUM_$varName + \$$varName\"; fi"
+    done
+}
+
+output_report_end()
+{
+    local report=$1; shift
+    for varName in $AVG_VARS; do
+        eval "AVG_$varName=\$(awk -v cnt=\$CNT_$varName \"BEGIN { sum = \$SUM_$varName; x = cnt > 0 ? sum / cnt : \\\"-\\\" ; print x }\")"
+    done
+
+    formatValue() { REPLY=$1; [[ $REPLY == - ]] || printf -v REPLY "$2" $REPLY; }
+    formatValue $AVG_extFPS  +%.0f; AVG_extFPS=$REPLY
+    formatValue $AVG_intFPS   %.3f; AVG_intFPS=$REPLY
+    formatValue $AVG_cpu      %.0f; AVG_cpu=$REPLY
+    formatValue $AVG_kbps     %.0f; AVG_kbps=$REPLY
+    formatValue $AVG_numI     %.1f; AVG_numI=$REPLY
+    formatValue $AVG_avgI     %.0f; AVG_avgI=$REPLY
+    formatValue $AVG_avgP     %.0f; AVG_avgP=$REPLY
+    formatValue $AVG_peak     %.1f; AVG_peak=$REPLY
+    formatValue $AVG_gPSNR    %.2f; AVG_gPSNR=$REPLY
+    formatValue $AVG_psnrI    %.2f; AVG_psnrI=$REPLY
+    formatValue $AVG_psnrP    %.2f; AVG_psnrP=$REPLY
+    formatValue $AVG_gSSIM    %.3f; AVG_gSSIM=$REPLY
+    formatValue $AVG_srcNumFr %.0f; AVG_srcNumFr=$REPLY
+    formatValue $AVG_TH       %.1f; AVG_TH=$REPLY
+    formatValue $AVG_numIntra %.1f; AVG_numIntra=$REPLY
+    formatValue $AVG_numInter %.1f; AVG_numInter=$REPLY
+    formatValue $AVG_numSkip  %.1f; AVG_numSkip=$REPLY
+
+	local str=
+	printf 	-v str    "%6s %8s %5s %5s"                "$AVG_extFPS" "$AVG_intFPS" "$AVG_cpu" "$AVG_kbps"
+	printf 	-v str "%s %4s %7s %6s %4s"         "$str" "$AVG_numI" "$AVG_avgI" "$AVG_avgP" "$AVG_peak"
+	printf 	-v str "%s %6s %6s %6s %6s"         "$str" "$AVG_gPSNR" "$AVG_psnrI" "$AVG_psnrP" "$AVG_gSSIM"
+	printf 	-v str "%s %-11s %11s %5s %2s %6s"	"$str" "-" "-" "$AVG_srcNumFr" "-" "-"
+	printf 	-v str "%s %9s %3s %-16s %-8s"      "$str" "-" "$AVG_TH" "-" "-"
+	printf 	-v str "%s %5s %5s %5s"             "$str" "$AVG_numIntra" "$AVG_numInter" "$AVG_numSkip"
+	printf 	-v str "%s %s"                      "$str" "<<< average >>>"
 	echo "$str" >> $report
 }
 
@@ -834,7 +886,7 @@ report_single_file()
     { read -r info; } < $outputDir/info.kw
     { read -r dict; } < $outputDir/report.kw
 
-	output_report $report $report_kw "$info $dict"
+	output_report_next $report $report_kw "$info $dict"
 }
 
 encdec_single_file()
