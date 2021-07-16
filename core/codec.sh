@@ -245,8 +245,10 @@ codec_verify()
 			codec_cmdSrc $codecId "$self"; cmd="$cmd $REPLY"
 			codec_cmdDst $codecId out.tmp; cmd="$cmd $REPLY"
 
-			if ! { echo "yes" | $cmd; } 1>/dev/null 2>&1; then
-				echo "warning: encoding error. Remove '$codecId' from a list." >&2;
+            local log
+			if ! log=$(echo "yes" | $cmd >&1); then
+				echo "warning: encoding error. Remove '$codecId' from a list." >&2
+                echo "$log" >&2
                 codecId_fail="$codecId_fail $codecId"
                 continue
 			fi
