@@ -26,6 +26,8 @@ windows_intel=windows/intel/sample_encode.exe
 windows_h265demo=windows/hw265/h265EncDemo.exe
 windows_h265demo_v2=windows/hw265_v2/hw265app.exe
 windows_h265demo_v3=windows/hw265_v3/hw265app.exe
+windows_h265svt=windows/h265svt/SvtHevcEncApp.exe
+windows_h265svt2=windows/h265svt2/SvtHevcEncApp.exe
 windows_h264demo=windows/hme264/HW264_Encoder_Demo.exe
 windows_h264aspt=windows/h264_aspt/h264enc.exe
 windows_vpx=windows/vpx/vpxenc.exe
@@ -47,6 +49,8 @@ android_vp8=$android_vpx
 android_vp9=$android_vpx
 
 linux_intel_kingsoft=linux-intel/kingsoft/appencoder
+linux_intel_h265svt=linux-intel/h265svt/SvtHevcEncApp
+linux_intel_h265svt2=linux-intel/h265svt2/SvtHevcEncApp
 linux_intel_vvenc=linux-intel/vvenc/vvencapp
 linux_intel_vvenc2=linux-intel/vvenc2/vvencapp
 linux_intel_vvencff=linux-intel/vvencff/vvencFFapp
@@ -69,6 +73,7 @@ codec_get_knownId()
     REPLY="$REPLY kingsoft ks"
     REPLY="$REPLY intel_sw intel_hw"
     REPLY="$REPLY h265demo h265demo_v2 h265demo_v3"
+    REPLY="$REPLY h265svt h265svt2"
     REPLY="$REPLY h264demo"
     REPLY="$REPLY h264aspt"
     REPLY="$REPLY vp8 vp9"
@@ -90,6 +95,7 @@ codec_default_preset()
 		h265demo)	preset=5;;
 		h265demo_v2)preset=6;; # 2,3,5,6
 		h265demo_v3)preset=6;;
+        h265svt*)   preset=7;; # 0(quality)-11(speed), 10: +1080p, 11: +4k
 		h264demo)	preset=-;;
         h264aspt)	preset=3;; # 0 - 10
         vp8)	    preset=5;; # 0 - 16
@@ -104,7 +110,7 @@ codec_fmt()
     local codecId=$1; shift
 	local fmt=
 	case $codecId in
-		ashevc|x265|kvazaar|kingsoft|ks|intel_*|h265demo*) fmt=h265;;
+		ashevc|x265|kvazaar|kingsoft|ks|intel_*|h265demo*|h265svt*) fmt=h265;;
 		h264demo|h264aspt) fmt=h264;;
         vp8) fmt=vp8;;
         vp9) fmt=vp9;;
@@ -248,7 +254,7 @@ codec_verify()
             local log
 			if ! log=$(echo "yes" | $cmd >&1); then
 				echo "warning: encoding error. Remove '$codecId' from a list." >&2
-                echo "$log" >&2
+                echo "$log"
                 codecId_fail="$codecId_fail $codecId"
                 continue
 			fi
@@ -680,6 +686,175 @@ cmd_h265demo_v3()
 
 	REPLY=$args
 }
+
+exe_h265svt() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_h265svt;
+				 [[ $1 == adb     ]] && REPLY=$android_h265svt;
+				 [[ $1 == ssh     ]] && REPLY=$linux_arm_h265svt;
+				 return 0;
+}
+src_h265svt() { REPLY="-i $1"; }
+dst_h265svt() { REPLY="-b $1"; }
+cmd_h265svt()
+{
+	local args= threads=1 res= fps= preset=7
+	while [[ "$#" -gt 0 ]]; do
+		case $1 in
+			-i|--input) 	args="$args -i $2";;
+			-o|--output) 	args="$args -b $2";;
+			   --res) 		res=$2;;
+			   --fps) 		fps=$2;;
+			   --preset) 	preset=$2;; # 0-11
+			   --qp)     	args="$args -rc 0 -q $2";;
+			   --bitrate)   args="$args -rc 1 -tbr $(( $2 * 1000 ))";; # kbit -> bit
+			   --threads)   threads=$2;;
+			*) error_exit "unrecognized option '$1'"
+		esac
+		shift 2
+	done
+	local width=${res%%x*}
+	local height=${res##*x}
+
+	args="$args -nch 1"                 # Channel Number          | -nch                          | [1 - 6]       | 1         | Number of encode instances
+                                        # ConfigFile              | -c                            | any string    | null      | Configuration file path
+    ####                                # InputFile               | -i                            | any string    | null      | Input file path and name
+    ####                                # StreamFile              | -b                            | any string    | null      | Output bitstream file path and name
+                                        # ErrorFile               | -errlog                       | any string    | stderr    | Error log displaying configuration or encode errors
+                                        # ReconFile               | -o                            | any string    | null      | Output reconstructed yuv used for debug purposes. Note: using this feature will affect the speed of the encoder significantly. This should only be used for debugging purposes.
+                                        # UseQpFile               | -use-q-file                   | [0, 1]        | 0         | When set to 1, overwrite the picture qp assignment using qp values in QpFile
+                                        # QpFile                  | -qp-file                      | any string    | null      | Path to qp file
+                                        # SegmentOvFile           | -segment-ov-file              | any string    | null      | Path to segment override file which will allow for sharpness improvement and bit rate reduction on a per segment basis. Refer to config/SVTSegmentOvFile.txt for details.
+	args="$args -encMode $preset"       # EncoderMode             | -encMode                      | [0 - 11]      | 7         | A preset defining the quality vs density tradeoff point that the encoding is to be performed at. 
+                                        #                                                                                     | (e.g. 0 is the highest quality mode, 11 is the highest density mode). 
+                                        #                                                                                     |   Section 3.4 outlines the preset availability per resolution
+	args="$args -bit-depth 8"           # EncoderBitDepth         | -bit-depth                    | [8, 10]       | 8         | Specifies the bit depth of input video
+                                        # EncoderColorFormat      | -color-format                 | [1, 2, 3]     | 1         | Specifies the chroma subsampling of input video(1: 420, 2: 422, 3: 444)
+                                        # CompressedTenBitFormat  | -compressed-ten-bit-format    | [0, 1]        | 0         | Offline packing of the 2bits: requires two bits packed input (0: OFF, 1: ON)
+	args="$args -w $width"              # SourceWidth             | -w                            | [64 - 8192]   | 0         | Input source width
+	args="$args -h $height"             # SourceHeight            | -h                            | [64 - 4320]   | 0         | Input source height
+                                        # FrameToBeEncoded        | -n                            | [0 - 2^31 -1] | 0         | Number of frames to be encoded, if number of frames is > number of frames in file, the encoder will loop to the beginning and continue the encode. 0 encodes the full clip. |
+                                        # BufferedInput           | -nb                           | [-1, 1 to 2^31 -1] | -1   | Number of frames to preload to the RAM before the start of the encode. If -nb = 100 and –n 1000 --> the encoder will encode the first 100 frames of the video 10 times. 
+                                        #                                                                                     |   Use -1 to not preload any frames.  This parameter is best used to eliminate the impact of disk reading on encoding speed and is most noticeable when frames sizes are 4k or 8k.
+                                        #                                                                                     |   Because frames are repeated when value specified (-nb) is less than the total frame count (-n), you should expect bitstreams to be different.
+	args="$args -profile 1"             # Profile                 | -profile                      | [1, 2]        | 2         | 1: Main, 2: Main 10
+	args="$args -tier 0"                # Tier                    | -tier                         | [0, 1]        | 0         | 0: Main, 1: High
+                                        # Level                   | -level                        | [1, 2, ...    | 0         | 0 to 6.2 [0 for auto determine Level]
+	args="$args -fps $fps"              # FrameRate               | -fps                          | [0 - 2^64 -1] | 60        | If the number is less than 1000, the input frame rate is an integer number between 1 and 60, else the input number is in Q16 format (shifted by 16 bits) [Max allowed is 240 fps]. If FrameRateNumerator and FrameRateDenominator are both !=0 the encoder will ignore this parameter
+                                        # FrameRateNumerator      | -fps-num                      | [0 - 2^64 -1] | 0         | Frame rate numerator e.g. 6000 When zero, the encoder will use –fps if FrameRateDenominator is also zero, otherwise an error is returned
+                                        # FrameRateDenominator    | -fps-denom                    | [0 - 2^64 -1] | 0         | Frame rate denominator e.g. 100 When zero, the encoder will use –fps if FrameRateNumerator is also zero, otherwise an error is returned
+                                        # Injector                | -inj                          | [0, 1]        | 0         | Enable injection of input frames at the specified framerate (0: OFF, 1: ON) |
+                                        # InjectorFrameRate       | -inj-frm-rt                   | [1 - 240]     | 60        | Frame Rate used for the injector. Recommended to match the encoder speed. |
+                                        # SpeedControlFlag        | -speed-ctrl                   | [0, 1]        | 0         | Enables the Speed Control functionality to achieve the real-time encoding speed defined by –fps.
+                                        #                                                                                     |   When this parameter is set to 1 it forces –inj to be 1 and -inj-frm-rt to be set to –fps. |
+                                        # InterlacedVideo         | -interlaced-video             | [0, 1]        | 0         | 1 : encoder will signal interlaced signal in the stream
+                                        #                                                                                     | 0 : assumes progressive signal
+                                        #
+                                        # SeparateFields          | -separate-fields              | [0, 1]        | 0         | 1 : Interlaced input, application will separate top and bottom fields and encode it as progressive. 
+                                        #                                                                                     | 0 : Treat video as progressive video
+                                        #
+    args="$args -hierarchical-levels 0" # HierarchicalLevels      | -hierarchical-levels          | [0 – 3]       | 3         | 0 : Flat
+                                        #                                                                                     | 1 : 2-Level Hierarchy
+                                        #                                                                                     | 2 : 3-Level Hierarchy
+                                        #                                                                                     | 3 : 4-Level Hierarchy: Minigop Size = (2^HierarchicalLevels) (e.g. 3 == > 7B pyramid, 2 ==> 3B Pyramid) Refer to Appendix A.1
+                                        #
+                                        # BaseLayerSwitchMode     | -base-layer-switch-mode       | [0, 1]        | 0         | 0 : Use B-frames in the base layer pointing to the same past picture
+                                        #                                                                                     | 1 : Use P-frames in the base layer. Refer to Appendix A.1
+                                        #
+    args="$args -pred-struct 0"         # PredStructure           | -pred-struct                  | [0 – 2]       | 2         | 0 : Low Delay P
+                                        #                                                                                     | 1 : Low Delay B
+                                        #                                                                                     | 2 : Random Access Refer to Appendix A.1
+                                        #
+#    args="$args -intra-period -1" # does not work
+    args="$args -intra-period -2"       # IntraPeriod             | -intra-period                 | [-2 - 255]    | -2        | Distance between Intra Frame inserted. 
+                                        #                                                                                     |   -1 denotes no intra update. 
+                                        #                                                                                     |   -2 denotes auto.
+                                        #
+                                        # IntraRefreshType        | -irefresh-type                | [-1, N]       | -1        |  -1: CRA (Open GOP)
+                                        #                                                                                     | >=0: IDR (Closed GOP, N is headers insertion interval, 0 supported if CQP, >=0 supported if VBR) Refer to Appendix A.3
+                                        #
+    ####                                # QP                      | -q                            | [0 - 51]      | 32        | Initial quantization parameter for the Intra pictures used when RateControlMode 0 (CQP)
+                                        # LoopFilterDisable       | -dlf                          | [0, 1]        | 0         | When set to 1 disables the Deblocking Loop Filtering
+                                        # SAO                     | -sao                          | [0, 1]        | 1         | When set to 0 the encoder will not use the Sample Adaptive Filter
+                                        # UseDefaultMeHme         | -use-default-me-hme           | [0, 1]        | 1         | 0 : Overwrite Default ME HME parameters
+                                        #                                                                                     | 1 : Use default ME HME parameters, dependent on width and height
+    args="$args -hme 1"                 # HME                     | -hme                          | [0,1]         | 1         | Enable HME, 0 = OFF, 1 = ON
+                                        # SearchAreaWidth         | -search-w                     | [1 - 256]     | Depends on input resolution
+                                        #                                                                                     | Motion vector search area width
+                                        # SearchAreaHeight        | -search-h                     | [1 - 256]     | Depends on input resolution
+                                        #                                                                                     | Motion vector search area height
+                                        # ConstrainedIntra        | -constrd-intra                | [0,1]         | 0         | Allow the use of Constrained Intra, when enabled, this features yields to sending two PPSs in the HEVC Elementary streams 0 = OFF, 1 = ON
+    ####                                # RateControlMode         | -rc                           | [0,1]         | 0         | 0 : CQP , 1 : VBR
+    ####                                # TargetBitRate           | -tbr                          | Any Number    | 7000000   | Target bitrate in bits / second. Only used when RateControlMode is set to 1
+                                        # vbvMaxrate              | -vbv-maxrate                  | Any Number    | 0         | VBVMaxrate in bits / second. Only used when RateControlMode is set to 1
+                                        # vbvBufsize              | -vbv-bufsize                  | Any Number    | 0         | VBV BufferSize in bits / second. Only used when RateControlMode is set to 1
+                                        # vbvBufInit              | -vbv-init                     | [0 - 100]     | 90        | Sets the initial percentage size that the VBV buffer is filled to
+                                        # hrdFlag                 | -hrd                          | [0,1]         | 0         | Sets the HRD (Hypothetical Reference Decoder) Flag in the encoded stream, 0 = OFF, 1 = ON 
+                                        #                                                                                     |   When hrdFlag is set to 1, vbvMaxrate and vbvBufsize must be greater than 0
+                                        # MaxQpAllowed            | -max-qp                       | [0 - 51]      | 48        | Maximum QP value allowed for rate control use. Only used when RateControlMode is set to 1. Has to be >= MinQpAllowed
+                                        # MinQpAllowed            | -min-qp                       | [0 - 50]      | 10        | Minimum QP value allowed for rate control use. Only used when RateControlMode is set to 1. Has to be < MaxQpAllowed
+#    args="$args -lad 0"                # LookAheadDistance       | -lad                          | [0 - 250]     | Depending on BRC mode
+                                        #                                                                                     | When RateControlMode is set to 1 it's best to set this parameter to be equal to the Intra period value (such is the default set by the encoder).  
+                                        #                                                                                     | When CQP is chosen, then a (2 \* minigopsize +1) look ahead is recommended
+                                        # SceneChangeDetection    | -scd                          | [0,1]         | 1         | Enables or disables the scene change detection algorithm 0 = OFF, 1 = ON
+                                        # BitRateReduction        | -brr                          | [0,1]         | 0         | Enables visual quality algorithms to reduce the output bitrate with minimal or no subjective visual quality impact. 0 = OFF, 1 = ON
+                                        # ImproveSharpness        | -sharp                        | [0,1]         | 0         | This is a visual quality knob that allows the use of adaptive quantization within the picture and enables visual quality algorithms 
+                                        #                                                                                     |   that improve the sharpness of the background.
+                                        #                                                                                     | This feature is only available for 4k and 8k resolutions 0 = OFF, 1 = ON
+                                        # VideoUsabilityInfo      | -vid-info                     | [0,1]         | 0         | Enables or disables sending a vui structure in the HEVC Elementary bitstream. 0 = OFF, 1 = ON
+                                        # HighDynamicRangeInput   | -hdr                          | [0,1]         | 0         | When set to 1, signals HDR10 input in the output HEVC elementary bitstream and forces VideoUsabilityInfo to 1. 0 = OFF, 1 = ON
+                                        # AccessUnitDelimiter     | -ua-delm                      | [0,1]         | 0         | SEI message, 0 = OFF, 1 = ON
+                                        # BufferingPeriod         | -pbuff                        | [0,1]         | 0         | SEI message, 0 = OFF, 1 = ON
+                                        # PictureTiming           | -tpic                         | [0,1]         | 0         | SEI message, 0 = OFF, 1 = ON. If 1, VideoUsabilityInfo should be also set to 1.
+                                        # RegisteredUserData      | -reg-user-data                | [0,1]         | 0         | SEI message, 0 = OFF, 1 = ON
+                                        # UnregisteredUserData    | -unreg-user-data              | [0,1]         | 0         | SEI message, 0 = OFF, 1 = ON
+                                        # RecoveryPoint           | -recovery-point               | [0,1]         | 0         | SEI message, 0 = OFF, 1 = ON
+    args="$args -temporal-id 0"         # TemporalId              | -temporal-id                  | [0,1]         | 1         | 0 = OFF
+                                        #                                                                                     | 1 = Insert temporal ID in NAL units
+                                        # AsmType                 | -asm                          | [0,1]         | 1         | Assembly instruction set (0: C Only, 1: Automatically select highest assembly instruction set supported)
+                                        # LogicalProcessors       | -lp                           | [0, total number of logical processor]
+                                        #                                                                         | 0         | The number of logical processor which encoder threads run on. Refer to Appendix A.2
+                                        # TargetSocket            | -ss                           | [-1,1]        | -1        | For dual socket systems, this can specify which socket the encoder runs on.  Refer to Appendix A.2
+    args="$args -thread-count $threads" # ThreadCount             | -thread-count                 | [0,N]         | 0         | The number of threads to get created and run, 0 = AUTO
+                                        # SwitchThreadsToRtPriority| -rt                          | [0,1]         | 1         | Enables or disables threads to real time priority, 0 = OFF, 1 = ON (only works on Linux)
+    args="$args -fpsinvps 0"            # FPSInVPS                | -fpsinvps                     | [0,1]         | 1         | Enables or disables the VPS timing info, 0 = OFF, 1 = ON
+                                        # TileRowCount            | -tile_row_cnt                 | [1,22]        | 1         | Tile count in the Row
+                                        # TileColumnCount         | -tile_col_cnt                 | [1,20]        | 1         | Tile count in the column
+                                        # TileSliceMode           | -tile_slice_mode              | [0,1]         | 0         | Per slice per tile, only valid for multi-tile
+                                        # UnrestrictedMotionVector| -umv                          | [0,1]         | 1         | Enables or disables unrestricted motion vectors
+                                        #                                                                                     |   0 = OFF (motion vectors are constrained within frame or tile boundary)
+                                        #                                                                                     |   1 = ON. For MCTS support, set -umv 0 with valid TileRowCount and TileColumnCount
+                                        # MaxCLL                  | -max-cll                      | [0 , 2^16-1]  | 0         | Maximum content light level (MaxCLL) as required by the Consumer Electronics Association 861.3 specification.
+                                        #                                                                                     |   Applicable for HDR content. If specified, signaled only when HighDynamicRangeInput is set to 1
+                                        # MaxFALL                 | -max-fall                     | [0 , 2^16-1]  | 0         | Maximum Frame Average light level (MaxFALL) as required by the Consumer Electronics Association 861.3 specification.
+                                        #                                                                                     |   Applicable for HDR content. If specified, signaled only when HighDynamicRangeInput is set to 1
+                                        # UseMasterDisplay        | -use-master-display           | [0,1]         | 0         | Enables or disables the MasterDisplayColorVolume<br>0 = OFF, 1 = ON
+                                        # MasterDisplay           | -master-display               | For R, G, B and whitepoint [0, 2^16-1]. For max, min luminance [0, 2^32-1]
+                                        #                                                                         | 0         | SMPTE ST 2086 mastering display color volume SEI info, specified as a string.
+                                        #                                                                                     |   The string format is “G(%hu,%hu)B(%hu,%hu)R(%hu,% hu)WP(%hu,%hu)L(%u,%u)” where %hu are unsigned 16bit integers and %u are unsigned 32bit integers.
+                                        #                                                                                     |   The SEI includes X, Y display primaries for RGB channels and white point (WP) in units of 0.00002 and max, min luminance (L) values in units of 0.0001 candela per meter square.
+                                        #                                                                                     |   Applicable for HDR content. Example for a P3D65 1000-nits monitor,G(13250,34500)B(7500,3 000)R(34000,16000)WP(15635,16 450)L(10000000,1)
+                                        # DolbyVisionRpuFile      | -dolby-vision-rpu             | any string    | null      | Path to the file containing Dolby Vision RPU metadata
+                                        # DolbyVisionProfile      | -dolby-vision-profile         | 8.1 or 81     | 0         | Generate bitstreams confirming to the specified Dolby Vision profile 8.1. When specified, enables HighDynamicRangeInput automatically.
+                                        #                                                                                     |   Applicable only for 10-bit input content. MasterDisplay should be set for using dolby vision profile 81. 
+                                        #                                                                                     | Pass the dynamic metadata through DolbyVisionRpuFile option
+                                        # NaluFile                | -nalu-file                    | any string    | null      | Path to the file containing CEA 608/708 metadata.
+                                        #                                                                                     |   Text file should contain the userSEI in POC order as per below format: `<POC><space><PREFIX><space><NALUNITTYPE>/<SEITYPE><space><SEI Payload>`.
+                                        #     
+
+
+
+	REPLY=$args
+}
+
+exe_h265svt2() { REPLY=;
+				 [[ $1 == windows ]] && REPLY=$windows_h265svt2;
+				 [[ $1 == adb     ]] && REPLY=$android_h265svt2;
+				 [[ $1 == ssh     ]] && REPLY=$linux_arm_h265svt2;
+				 return 0;
+}
+src_h265svt2() { src_h265svt "$@"; }
+dst_h265svt2() { dst_h265svt "$@"; }
+cmd_h265svt2() { cmd_h265svt "$@"; }
 
 exe_h264demo() { REPLY=; [[ $1 == windows ]] && REPLY=$windows_h264demo; return 0; }
 src_h264demo() { REPLY="Source = $1"; }

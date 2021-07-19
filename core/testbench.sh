@@ -1320,6 +1320,9 @@ parse_stdoutLog()
 			[[ -z "$fps" ]] && fps=$(grep -i 'Encode speed:'   $log | tr -s ' ' | cut -d' ' -f 9)
 			fps=${fps%%fps*}
 		;;
+		h265svt*)
+            fps=$(grep -i 'Average Speed:' $log | tr '\t' ' ' | tr -s ' ' | cut -d' ' -f 3)
+        ;;
 		h264demo)
 			fps=$(grep -i 'Tests completed' $log | tr -s ' ' | cut -d' ' -f 1)
 		;;
